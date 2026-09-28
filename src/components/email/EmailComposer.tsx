@@ -178,6 +178,32 @@ export function EmailComposer({ investorId, defaults, setup, onSent, onCancel, t
         </div>
       )}
 
+      {/* Spam check, kept at the top so it's in view while writing and sending. */}
+      {hints.length > 0 ? (
+        <div role="status" className="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800 ring-1 ring-amber-200">
+          <div className="flex items-center gap-1.5 font-semibold">
+            <svg className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor" aria-hidden>
+              <path fillRule="evenodd" d="M8.485 2.495c.673-1.167 2.357-1.167 3.03 0l6.28 10.875c.673 1.167-.17 2.625-1.516 2.625H3.72c-1.347 0-2.189-1.458-1.515-2.625L8.485 2.495zM10 6a.75.75 0 01.75.75v3.5a.75.75 0 01-1.5 0v-3.5A.75.75 0 0110 6zm0 9a1 1 0 100-2 1 1 0 000 2z" clipRule="evenodd" />
+            </svg>
+            {hints.length === 1 ? "1 thing" : `${hints.length} things`} could send this email to spam
+          </div>
+          <ul className="mt-1 list-disc space-y-0.5 pl-5">
+            {hints.map((hint) => (
+              <li key={hint}>{hint}</li>
+            ))}
+          </ul>
+        </div>
+      ) : (
+        (subject.trim() || body.trim()) && (
+          <div role="status" className="flex items-center gap-1.5 rounded-lg bg-emerald-50 px-3 py-1.5 text-xs font-medium text-emerald-700 ring-1 ring-emerald-200">
+            <svg className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor" aria-hidden>
+              <path fillRule="evenodd" d="M16.704 4.153a.75.75 0 01.143 1.052l-8 10.5a.75.75 0 01-1.127.075l-4.5-4.5a.75.75 0 011.06-1.06l3.894 3.893 7.48-9.817a.75.75 0 011.05-.143z" clipRule="evenodd" />
+            </svg>
+            No spam warnings
+          </div>
+        )
+      )}
+
       <div className="flex items-center gap-2">
         <span className="w-14 shrink-0 text-sm text-slate-500">To</span>
         <input
@@ -246,17 +272,6 @@ export function EmailComposer({ investorId, defaults, setup, onSent, onCancel, t
           </button>
         ))}
       </div>
-
-      {hints.length > 0 && (
-        <div className="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800 ring-1 ring-amber-200">
-          <div className="font-medium">Tips to stay out of spam</div>
-          <ul className="mt-1 list-disc space-y-0.5 pl-4">
-            {hints.map((hint) => (
-              <li key={hint}>{hint}</li>
-            ))}
-          </ul>
-        </div>
-      )}
 
       {bouncedWarning && (
         <div className="rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-700 ring-1 ring-rose-200">
