@@ -11,7 +11,7 @@ import { isSmtpConfigured, sendEmail } from "../../../lib/mail/send";
 import { findInvestorIdsByAddresses, insertEmail } from "../../../lib/mail/store";
 import { cleanAddressList, renderTemplate, textToHtml } from "../../../lib/mail/text";
 import { newOpenToken, publicBaseUrl, withOpenPixel } from "../../../lib/mail/tracking";
-import { markUndeliverable } from "../../../lib/mail/undeliverable";
+import { autoRateInvestors } from "../../../lib/mail/autoQuality";
 import type { EmailSummary } from "../../../lib/types";
 
 const PAGE_SIZE = 50;
@@ -242,17 +242,27 @@ export async function POST(request: NextRequest) {
         }))
       );
 
-      // Addresses the mail server refused outright are marked Low for this company.
-      let markedLow: string[] = [];
-      if (sent.rejectedRecipients.length > 0) {
-        markedLow = await markUndeliverable(client, {
+      // Rate the investors from the outcome: refused addresses → Low, delivered to the server → Medium.
+      const rejectedIds = sent.rejectedRecipients.length > 0 ? await findInvestorIdsByAddresses(client, sent.rejectedRecipients) : [];
+      if (rejectedIds.length > 0) {
+        await autoRateInvestors(client, {
           companyId,
-          investorIds: await findInvestorIdsByAddresses(client, sent.rejectedRecipients),
+          investorIds: rejectedIds,
+          outcome: "bounced",
           emailId,
-          reason: `Marked Low because the mail server refused the address (${sent.rejectedRecipients.join(", ")}).`,
+          reason: `The mail server refused the address (${sent.rejectedRecipients.join(", ")}).`,
         });
       }
-      return { id: emailId, investorIds, markedLow };
+      if (!sent.error) {
+        await autoRateInvestors(client, {
+          companyId,
+          investorIds: investorIds.filter((id) => !rejectedIds.includes(id)),
+          outcome: "sent",
+          emailId,
+          reason: `Emailed: "${renderedSubject}".`,
+        });
+      }
+      return { id: emailId, investorIds };
     });
 
     auditLater(request, session, {

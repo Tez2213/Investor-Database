@@ -6,7 +6,7 @@ import { pool } from "../db";
 import { logActivities } from "../activity";
 import { findSentMailbox, withImap } from "./imap";
 import { findInvestorIdsByAddresses, findThread, insertEmail } from "./store";
-import { bouncedAddresses, isBounce, markUndeliverable } from "./undeliverable";
+import { autoRateInvestors, bouncedAddresses, isAutoReply, isBounce } from "./autoQuality";
 
 /** Messages imported per folder per run; the next run continues where this one stopped. */
 const MAX_MESSAGES_PER_RUN = 200;
@@ -98,7 +98,8 @@ async function importMessage(db: PoolClient, source: Buffer, meta: ImportMeta): 
     [inReplyTo, ...references].filter((id): id is string => Boolean(id))
   );
   // A "delivery failed" notice belongs to the investors it bounced for, not the mail server that sent it.
-  const bounced = meta.direction === "inbound" && isBounce(parsed, from.address) ? await bouncedInvestorIds(db, meta.companyId, parsed, [...to, ...cc]) : [];
+  const bounceNotice = meta.direction === "inbound" && isBounce(parsed, from.address);
+  const bounced = bounceNotice ? await bouncedInvestorIds(db, meta.companyId, parsed, [...to, ...cc]) : [];
   const counterparts = meta.direction === "inbound" ? [from.address] : [...to, ...cc];
   const investorIds = bounced.length > 0 ? [...bounced] : await findInvestorIdsByAddresses(db, counterparts);
   if (thread?.investorId && !investorIds.includes(thread.investorId)) {
@@ -129,12 +130,30 @@ async function importMessage(db: PoolClient, source: Buffer, meta: ImportMeta): 
   // Already stored, e.g. a message sent from the portal that is now in the Sent folder.
   if (!emailId) return false;
 
+  // Rate investors from what happened: bounced → Low, a real reply → High, mail sent from the mailbox → Medium.
   if (bounced.length > 0) {
-    await markUndeliverable(db, {
+    await autoRateInvestors(db, {
       companyId: meta.companyId,
       investorIds: bounced,
+      outcome: "bounced",
       emailId,
-      reason: `Marked Low because an email to this investor bounced: "${parsed.subject ?? "Delivery failed"}".`,
+      reason: `An email to this investor bounced: "${parsed.subject ?? "Delivery failed"}".`,
+    });
+  } else if (meta.direction === "inbound" && !bounceNotice && !isAutoReply(parsed)) {
+    await autoRateInvestors(db, {
+      companyId: meta.companyId,
+      investorIds,
+      outcome: "replied",
+      emailId,
+      reason: `Replied: "${parsed.subject ?? ""}".`,
+    });
+  } else if (meta.direction === "outbound") {
+    await autoRateInvestors(db, {
+      companyId: meta.companyId,
+      investorIds,
+      outcome: "sent",
+      emailId,
+      reason: `Emailed from the mailbox: "${parsed.subject ?? ""}".`,
     });
   }
 

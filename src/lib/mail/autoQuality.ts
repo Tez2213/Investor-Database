@@ -2,19 +2,34 @@ import type { ParsedMail } from "mailparser";
 import type { PoolClient } from "pg";
 import { logActivities } from "../activity";
 
-export const UNDELIVERABLE_QUALITY = "Low";
 const ADDRESS = /[a-z0-9._%+'-]+@[a-z0-9.-]+\.[a-z]{2,}/gi;
 
+export type MailOutcome = "bounced" | "sent" | "replied";
+
 /**
- * Marks investors whose email could not be delivered as Low quality for this
- * company, with a timeline entry saying why. Investors already rated Low are left alone.
+ * How email outcomes rate an investor for the company that sent the email:
+ * - bounced → Low (the address doesn't work)
+ * - sent → Medium, only while unrated (never lowers a High, and a sent email
+ *   can still bounce later, so a Low stays Low)
+ * - replied → High
  */
-export async function markUndeliverable(
+const OUTCOME_RULES: Record<MailOutcome, { quality: string; actor: string; appliesTo: (current: string | null) => boolean }> = {
+  bounced: { quality: "Low", actor: "Auto: email not delivered", appliesTo: (current) => current !== "Low" },
+  sent: { quality: "Medium", actor: "Auto: email sent", appliesTo: (current) => current === null },
+  replied: { quality: "High", actor: "Auto: investor replied", appliesTo: (current) => current !== "High" },
+};
+
+/**
+ * Updates this company's quality rating after an email outcome, with a
+ * timeline entry saying why. Returns the investors whose rating changed.
+ */
+export async function autoRateInvestors(
   db: PoolClient,
-  params: { companyId: string; investorIds: (string | number)[]; reason: string; emailId?: string | null }
+  params: { companyId: string; investorIds: (string | number)[]; outcome: MailOutcome; reason: string; emailId?: string | null }
 ): Promise<string[]> {
   const ids = Array.from(new Set(params.investorIds.map(String)));
   if (ids.length === 0) return [];
+  const rule = OUTCOME_RULES[params.outcome];
 
   const before = await db.query<{ id: string; quality: string | null }>(
     `SELECT i.id, d.quality FROM investors i
@@ -23,16 +38,15 @@ export async function markUndeliverable(
      FOR UPDATE OF i`,
     [params.companyId, ids]
   );
-  const changed = before.rows.filter((row) => row.quality !== UNDELIVERABLE_QUALITY);
+  const changed = before.rows.filter((row) => rule.appliesTo(row.quality));
   if (changed.length === 0) return [];
 
-  const actor = "Auto: email not delivered";
   await db.query(
     `INSERT INTO investor_company_data (investor_id, company_id, quality, updated_at, updated_by)
      SELECT id, $1, $3, now(), $4 FROM unnest($2::bigint[]) AS id
      ON CONFLICT (investor_id, company_id) DO UPDATE
        SET quality = EXCLUDED.quality, updated_at = now(), updated_by = EXCLUDED.updated_by`,
-    [params.companyId, changed.map((row) => row.id), UNDELIVERABLE_QUALITY, actor]
+    [params.companyId, changed.map((row) => row.id), rule.quality, rule.actor]
   );
   await logActivities(
     db,
@@ -40,13 +54,28 @@ export async function markUndeliverable(
       investorId: row.id,
       companyId: params.companyId,
       kind: "field_change" as const,
-      actor,
+      actor: rule.actor,
       body: params.reason,
       emailId: params.emailId ?? null,
-      details: { changes: [{ field: "quality", from: row.quality, to: UNDELIVERABLE_QUALITY }], automatic: true },
+      details: { changes: [{ field: "quality", from: row.quality, to: rule.quality }], automatic: true },
     }))
   );
   return changed.map((row) => row.id);
+}
+
+/** Out-of-office and other automatic answers, which shouldn't count as a reply. */
+export function isAutoReply(parsed: ParsedMail): boolean {
+  const header = (name: string) => {
+    const value = parsed.headers.get(name);
+    return typeof value === "string" ? value.toLowerCase() : value ? String((value as { value?: string }).value ?? value).toLowerCase() : "";
+  };
+  const autoSubmitted = header("auto-submitted");
+  if (autoSubmitted && autoSubmitted !== "no") return true;
+  if (header("x-autoreply") || header("x-autorespond") || header("x-auto-response-suppress").includes("all")) return true;
+  if (/auto_reply|bulk|junk|list/.test(header("precedence"))) return true;
+  return /out of (the )?office|automatic reply|auto.?reply|autoreply|auto-response|away from (the )?office|on (annual )?leave|vacation/i.test(
+    parsed.subject ?? ""
+  );
 }
 
 /** Whether an incoming message is a "delivery failed" notice (not a delay warning). */
