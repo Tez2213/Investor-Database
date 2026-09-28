@@ -121,6 +121,10 @@ export type LeadImportSummary = {
   inserted: number;
   duplicates: number;
   invalid: number;
+  /** Ids of the leads created by this request. */
+  insertedIds?: string[];
+  /** Ids of existing investors that rows in this request matched. */
+  duplicateIds?: string[];
 };
 
 export type InvestorProfileResponse = {
@@ -129,6 +133,7 @@ export type InvestorProfileResponse = {
   nextId: string | null;
   stats: {
     emailsSent: number;
+    emailsOpened: number;
     emailsReceived: number;
     comments: number;
     lastEmailAt: string | null;
@@ -141,6 +146,7 @@ export type ActivityKind =
   | "email_sent"
   | "email_failed"
   | "email_received"
+  | "email_opened"
   | "notes_updated"
   | "tags_updated";
 
@@ -175,6 +181,9 @@ export type EmailSummary = {
   error: string | null;
   is_read: boolean;
   occurred_at: string;
+  /** First time the recipient opened it (sent emails with open tracking only). */
+  opened_at: string | null;
+  open_count: number;
   investor_name?: string | null;
 };
 
@@ -202,6 +211,19 @@ export type Activity = {
 export type ActivitiesResponse = {
   data: Activity[];
   nextCursor: string | null;
+};
+
+/** Outreach numbers for the Inbox page. */
+export type EmailStats = {
+  days: number;
+  sent: number;
+  failed: number;
+  /** Sent emails that carried the open-tracking image. */
+  tracked: number;
+  opened: number;
+  received: number;
+  investorsContacted: number;
+  investorsReplied: number;
 };
 
 export type EmailSetupStatus = {

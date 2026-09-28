@@ -30,6 +30,8 @@ export type NewEmail = {
   imapUid?: number | null;
   isRead: boolean;
   occurredAt: Date;
+  /** Set on emails sent from the portal with an open-tracking image. */
+  openToken?: string | null;
 };
 
 /** Inserts an email; returns its id, or null if this company already has that Message-ID. */
@@ -37,8 +39,8 @@ export async function insertEmail(db: Queryable, email: NewEmail): Promise<strin
   const result = await db.query<{ id: string }>(
     `INSERT INTO emails (investor_id, direction, status, from_address, from_name, to_addresses, cc_addresses,
                          subject, text_body, html_body, snippet, message_id, in_reply_to, thread_id, error,
-                         sent_by, mailbox, imap_uid, is_read, occurred_at, company_id)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21)
+                         sent_by, mailbox, imap_uid, is_read, occurred_at, company_id, open_token)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22)
      ON CONFLICT (company_id, message_id) DO NOTHING
      RETURNING id`,
     [
@@ -63,6 +65,7 @@ export async function insertEmail(db: Queryable, email: NewEmail): Promise<strin
       email.isRead,
       email.occurredAt,
       email.companyId,
+      email.openToken ?? null,
     ]
   );
   return result.rows[0]?.id ?? null;

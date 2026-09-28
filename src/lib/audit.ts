@@ -14,7 +14,7 @@ export type AuditEntry = {
   companyId?: string | null;
 };
 
-function clientInfo(request: NextRequest | null) {
+export function clientInfo(request: NextRequest | null) {
   if (!request) return { ip: null, userAgent: null };
   const forwarded = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim();
   return {

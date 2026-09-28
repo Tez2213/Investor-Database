@@ -68,12 +68,29 @@ function ViewEmailButton({ emailId, onViewEmail }: { emailId: string | null; onV
   );
 }
 
+/** "Opened 2×" / "Not opened yet" under a sent email; nothing for untracked emails. */
+function OpenStatus({ email }: { email: NonNullable<Activity["email"]> }) {
+  if (email.opened_at) {
+    return (
+      <span className="mt-1 inline-flex items-center gap-1 rounded-full bg-teal-50 px-2 py-0.5 text-xs font-medium text-teal-700 ring-1 ring-inset ring-teal-200">
+        <svg className="h-3 w-3" viewBox="0 0 20 20" fill="currentColor">
+          <path d="M10 12.5a2.5 2.5 0 100-5 2.5 2.5 0 000 5z" />
+          <path fillRule="evenodd" d="M.664 10.59a1.651 1.651 0 010-1.186A10.004 10.004 0 0110 3c4.257 0 7.893 2.66 9.336 6.41.147.381.146.804 0 1.186A10.004 10.004 0 0110 17c-4.257 0-7.893-2.66-9.336-6.41zM14 10a4 4 0 11-8 0 4 4 0 018 0z" clipRule="evenodd" />
+        </svg>
+        Opened{email.open_count > 1 ? ` ${email.open_count}×` : ""}
+      </span>
+    );
+  }
+  return null;
+}
+
 const DOT_COLORS: Record<Activity["kind"], string> = {
   comment: "bg-sky-500",
   field_change: "bg-slate-400",
   email_sent: "bg-indigo-500",
   email_failed: "bg-rose-500",
   email_received: "bg-emerald-500",
+  email_opened: "bg-teal-500",
   notes_updated: "bg-amber-400",
   tags_updated: "bg-violet-400",
 };
@@ -128,6 +145,20 @@ function ActivityContent({ activity, onViewEmail }: { activity: Activity; onView
       );
     }
 
+    case "email_opened": {
+      const count = email?.open_count ?? 1;
+      return (
+        <div className="text-sm text-slate-700">
+          <div>
+            {actor} opened your email{" "}
+            {email?.subject && <span className="font-medium text-slate-900">“{email.subject}”</span>}
+            {count > 1 && <span className="text-slate-400"> · opened {count} times</span>}
+          </div>
+          <ViewEmailButton emailId={activity.email_id} onViewEmail={onViewEmail} />
+        </div>
+      );
+    }
+
     case "email_sent":
     case "email_failed":
     case "email_received": {
@@ -158,6 +189,7 @@ function ActivityContent({ activity, onViewEmail }: { activity: Activity; onView
       return (
         <div className="text-sm text-slate-700">
           <div>{line}</div>
+          {activity.kind === "email_sent" && email && <OpenStatus email={email} />}
           {email?.snippet && <div className="mt-1 line-clamp-2 text-xs text-slate-500">{email.snippet}</div>}
           <ViewEmailButton emailId={activity.email_id} onViewEmail={onViewEmail} />
         </div>

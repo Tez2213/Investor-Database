@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { EmailMessage, EmailSetupStatus, EmailSummary } from "../../lib/types";
 import { companyName } from "../../lib/companies";
@@ -11,7 +10,9 @@ import { useSession } from "../SessionProvider";
 import { EmailComposer } from "../email/EmailComposer";
 import { EmailSetupNotice } from "../email/EmailSetupNotice";
 import { EmailStatusBadge, EmailViewer } from "../email/EmailViewer";
+import { InvestorChip } from "../email/InvestorChip";
 import { buildReplyDefaults, type ComposerDefaults } from "../email/replyDefaults";
+import { EmailStatsBar } from "./EmailStatsBar";
 
 const FOLDERS = [
   { id: "inbox", label: "Inbox" },
@@ -129,7 +130,7 @@ export function InboxPage() {
     <div className="min-h-screen bg-slate-50 text-slate-900">
       <AppHeader />
 
-      <div className="mx-auto max-w-[1400px] px-6 py-6">
+      <div className="mx-auto max-w-[1400px] animate-page-in px-6 py-6">
         <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
           <div>
             <h1 className="text-xl font-semibold tracking-tight">{companyName(user.companyId)} inbox</h1>
@@ -164,6 +165,8 @@ export function InboxPage() {
         <div className="mb-5">
           <EmailSetupNotice status={status} />
         </div>
+
+        <EmailStatsBar />
 
         {composer && (
           <section className="mb-5 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
@@ -231,15 +234,23 @@ export function InboxPage() {
                       ? email.from_name || email.from_address
                       : `To: ${email.to_addresses.join(", ")}`;
                   const unread = email.direction === "inbound" && !email.is_read;
+                  const open = () => {
+                    setViewingId(email.id);
+                    if (unread) setEmails((previous) => previous.map((item) => (item.id === email.id ? { ...item, is_read: true } : item)));
+                  };
                   return (
-                    <li key={email.id}>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setViewingId(email.id);
-                          if (unread) setEmails((previous) => previous.map((item) => (item.id === email.id ? { ...item, is_read: true } : item)));
+                    <li key={email.id} className="animate-fade-in">
+                      <div
+                        role="button"
+                        tabIndex={0}
+                        onClick={open}
+                        onKeyDown={(event) => {
+                          if (event.key === "Enter" || event.key === " ") {
+                            event.preventDefault();
+                            open();
+                          }
                         }}
-                        className="flex w-full items-start gap-3 px-5 py-3.5 text-left transition-colors hover:bg-slate-50"
+                        className="flex w-full cursor-pointer items-start gap-3 px-5 py-3.5 text-left outline-none transition-colors hover:bg-slate-50 focus-visible:bg-indigo-50/60"
                       >
                         <span className={`mt-2 h-2 w-2 shrink-0 rounded-full ${unread ? "bg-indigo-600" : "bg-transparent"}`} />
                         <div className="min-w-0 flex-1">
@@ -250,23 +261,18 @@ export function InboxPage() {
                           <div className={`truncate text-sm ${unread ? "font-semibold text-slate-900" : "text-slate-800"}`}>
                             {email.subject || "(no subject)"}
                           </div>
-                          <div className="mt-0.5 flex items-center gap-2">
-                            <span className="truncate text-xs text-slate-500">{email.snippet}</span>
-                          </div>
+                          <div className="mt-0.5 truncate text-xs text-slate-500">{email.snippet}</div>
                           <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
                             <EmailStatusBadge email={email} />
-                            {email.investor_id && (
-                              <Link
-                                href={`/investors/${email.investor_id}`}
-                                onClick={(event) => event.stopPropagation()}
-                                className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-600 hover:bg-slate-200"
-                              >
-                                {email.investor_name || "Investor"} →
-                              </Link>
+                            {email.direction === "outbound" && email.status === "sent" && email.opened_at && (
+                              <span className="rounded-full bg-teal-50 px-2 py-0.5 text-xs font-medium text-teal-700 ring-1 ring-teal-200">
+                                Opened{email.open_count > 1 ? ` ${email.open_count}×` : ""}
+                              </span>
                             )}
+                            {email.investor_id && <InvestorChip id={email.investor_id} name={email.investor_name} />}
                           </div>
                         </div>
-                      </button>
+                      </div>
                     </li>
                   );
                 })}

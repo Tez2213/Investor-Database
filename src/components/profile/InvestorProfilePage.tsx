@@ -13,6 +13,8 @@ import type {
   InvestorProfileResponse,
 } from "../../lib/types";
 import { COMPANIES, companyName } from "../../lib/companies";
+import { updateCachedInvestor } from "../../lib/investorListCache";
+import { followInSideWindow, openInSideWindow } from "../../lib/sideWindow";
 import {
   dayLabel,
   formatDateTime,
@@ -73,6 +75,43 @@ function InfoRow({ label, source, children }: { label: string; source?: "predict
   );
 }
 
+/** How often the page checks the mailbox for replies while it is open. */
+const MAIL_CHECK_MS = 60_000;
+
+function CopyButton({ value, label }: { value: string; label: string }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <button
+      type="button"
+      title={`Copy ${label}`}
+      onClick={async () => {
+        try {
+          await navigator.clipboard.writeText(value);
+          setCopied(true);
+          setTimeout(() => setCopied(false), 1400);
+        } catch {
+          // Clipboard unavailable; the value is visible to copy by hand.
+        }
+      }}
+      className="ml-2 shrink-0 rounded-md px-1.5 py-0.5 text-xs font-medium text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-700"
+    >
+      {copied ? "Copied" : "Copy"}
+    </button>
+  );
+}
+
+function LinkedInIcon({ className = "h-4 w-4" }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+      <path d="M20.45 20.45h-3.55v-5.57c0-1.33-.02-3.03-1.85-3.03-1.85 0-2.14 1.45-2.14 2.94v5.66H9.36V9h3.41v1.56h.05c.48-.9 1.64-1.85 3.38-1.85 3.61 0 4.28 2.38 4.28 5.47v6.27zM5.34 7.43a2.06 2.06 0 110-4.12 2.06 2.06 0 010 4.12zM7.12 20.45H3.56V9h3.56v11.45z" />
+    </svg>
+  );
+}
+
+function newEmailDefaults(investor: Investor): ComposerDefaults {
+  return { to: investor.email ? [investor.email] : [], subject: "", body: "Hi {{first_name}},\n\n" };
+}
+
 function ExternalLink({ value, label }: { value: string; label: string }) {
   const href = toHref(value);
   return href ? (
@@ -93,7 +132,12 @@ export function InvestorProfilePage({ id, initialCompose }: { id: string; initia
   const [activities, setActivities] = useState<Activity[]>([]);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [activitiesLoading, setActivitiesLoading] = useState(true);
-  const [composer, setComposer] = useState<{ key: number; defaults: ComposerDefaults; title: string } | null>(null);
+  // The composer is always on the page; defaults null means "new email to this investor".
+  const [composer, setComposer] = useState<{ key: number; defaults: ComposerDefaults | null; title: string }>({
+    key: 0,
+    defaults: null,
+    title: "New email",
+  });
   const [viewingEmailId, setViewingEmailId] = useState<string | null>(null);
   const [isEditingDetails, setIsEditingDetails] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
@@ -137,14 +181,42 @@ export function InvestorProfilePage({ id, initialCompose }: { id: string; initia
     loadActivities(null);
   }, [loadProfile, loadActivities]);
 
-  const openComposer = useCallback((investor: Investor, defaults?: ComposerDefaults, title = "New email") => {
-    setComposer({
-      key: Date.now(),
-      title,
-      defaults: defaults ?? { to: investor.email ? [investor.email] : [], subject: "", body: "Hi {{first_name}},\n\n" },
+  const focusComposer = useCallback(() => {
+    requestAnimationFrame(() => {
+      const section = document.getElementById("composer");
+      section?.scrollIntoView({ behavior: "smooth", block: "start" });
+      section?.querySelector<HTMLTextAreaElement>("textarea")?.focus({ preventScroll: true });
     });
-    requestAnimationFrame(() => document.getElementById("composer")?.scrollIntoView({ behavior: "smooth", block: "start" }));
   }, []);
+
+  /** Loads a reply (or a fresh email) into the composer and brings it into view. */
+  const openComposer = useCallback(
+    (defaults: ComposerDefaults | null, title = "New email") => {
+      setComposer({ key: Date.now(), defaults, title });
+      focusComposer();
+    },
+    [focusComposer]
+  );
+
+  const [popupBlocked, setPopupBlocked] = useState(false);
+  const linkedinUrl = toHref(profile?.data.linkedin ?? null);
+
+  const showLinkedIn = useCallback(() => {
+    if (!linkedinUrl) return;
+    setPopupBlocked(!openInSideWindow(linkedinUrl));
+  }, [linkedinUrl]);
+
+  // If the LinkedIn window is already open, move it to this investor's profile.
+  useEffect(() => {
+    if (linkedinUrl) followInSideWindow(linkedinUrl);
+  }, [linkedinUrl]);
+
+  const resetComposer = useCallback(() => setComposer({ key: Date.now(), defaults: null, title: "New email" }), []);
+
+  // Keep the investor list (restored when going back) in step with edits made here.
+  useEffect(() => {
+    if (profile?.data) updateCachedInvestor(profile.data);
+  }, [profile?.data]);
 
   useEffect(() => {
     let cancelled = false;
@@ -153,7 +225,7 @@ export function InvestorProfilePage({ id, initialCompose }: { id: string; initia
     // eslint-disable-next-line react-hooks/set-state-in-effect
     loadProfile()
       .then((data) => {
-        if (!cancelled && initialCompose && data.data.email) openComposer(data.data);
+        if (!cancelled && initialCompose && data.data.email) focusComposer();
       })
       .catch((err: Error) => !cancelled && setLoadError(err.message));
     loadActivities(null);
@@ -163,26 +235,36 @@ export function InvestorProfilePage({ id, initialCompose }: { id: string; initia
       .then((data: FilterOptions | null) => !cancelled && data && setFilterOptions(data))
       .catch(() => undefined);
 
-    // Pull any new mail for this company in the background, then refresh the timeline.
+    // Pull new mail in the background (now and every minute while the tab is
+    // visible), so an investor's reply shows up on the timeline by itself.
+    let canSync = false;
+    async function checkMail() {
+      if (!canSync || document.visibilityState !== "visible") return;
+      const sync = await fetch("/api/email/sync", { method: "POST" })
+        .then((res) => (res.ok ? res.json() : null))
+        .catch(() => null);
+      if (!cancelled && sync?.imported > 0) {
+        notifyMailChanged();
+        loadActivities(null);
+        loadProfile().catch(() => undefined);
+      }
+    }
     fetch("/api/email/status")
       .then((res) => (res.ok ? res.json() : null))
-      .then(async (status: EmailSetupStatus | null) => {
+      .then((status: EmailSetupStatus | null) => {
         if (cancelled || !status) return;
         setSetup(status);
-        if (!status.imapConfigured) return;
-        const sync = await fetch("/api/email/sync", { method: "POST" }).then((res) => (res.ok ? res.json() : null));
-        if (!cancelled && sync?.imported > 0) {
-          notifyMailChanged();
-          loadActivities(null);
-          loadProfile().catch(() => undefined);
-        }
+        canSync = status.imapConfigured;
+        checkMail();
       })
       .catch(() => undefined);
+    const timer = setInterval(checkMail, MAIL_CHECK_MS);
 
     return () => {
       cancelled = true;
+      clearInterval(timer);
     };
-  }, [initialCompose, loadActivities, loadProfile, openComposer]);
+  }, [initialCompose, focusComposer, loadActivities, loadProfile]);
 
   const investor = profile?.data;
 
@@ -240,7 +322,7 @@ export function InvestorProfilePage({ id, initialCompose }: { id: string; initia
         </div>
       )}
 
-      <div className="mx-auto max-w-[1240px] px-6 py-6">
+      <div className="mx-auto max-w-[1240px] animate-page-in px-6 py-6">
         {/* Header */}
         <div className="mb-6 flex flex-wrap items-start justify-between gap-4">
           <div className="flex min-w-0 items-start gap-3">
@@ -272,10 +354,21 @@ export function InvestorProfilePage({ id, initialCompose }: { id: string; initia
           </div>
 
           <div className="flex items-center gap-2">
+            {linkedinUrl && (
+              <button
+                type="button"
+                onClick={showLinkedIn}
+                title="Open the LinkedIn profile in a window beside the portal"
+                className="flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3.5 py-2 text-sm font-medium text-[#0a66c2] hover:bg-blue-50"
+              >
+                <LinkedInIcon />
+                LinkedIn
+              </button>
+            )}
             {investor?.email && (
               <button
                 type="button"
-                onClick={() => openComposer(investor)}
+                onClick={focusComposer}
                 className="flex items-center gap-1.5 rounded-lg bg-slate-900 px-3.5 py-2 text-sm font-medium text-white hover:bg-slate-800"
               >
                 <svg className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
@@ -295,23 +388,33 @@ export function InvestorProfilePage({ id, initialCompose }: { id: string; initia
           <div className="min-w-0 space-y-5">
             <EmailSetupNotice status={setup} />
 
-            {composer && investor && (
-              <section id="composer" className="scroll-mt-24 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+            {!investor ? (
+              <div className="h-80 animate-pulse rounded-2xl border border-slate-200 bg-white" />
+            ) : investor.email ? (
+              <section id="composer" className="animate-fade-in scroll-mt-24 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
                 <EmailComposer
                   key={composer.key}
                   investorId={investor.id}
-                  defaults={composer.defaults}
+                  defaults={composer.defaults ?? newEmailDefaults(investor)}
                   title={composer.title}
                   setup={setup}
-                  onCancel={() => setComposer(null)}
+                  onCancel={resetComposer}
                   onSent={({ ok }) => {
                     if (ok) {
-                      setComposer(null);
+                      resetComposer();
                       showNotice("Email sent");
                     }
                     refresh();
                   }}
                 />
+              </section>
+            ) : (
+              <section className="animate-fade-in rounded-2xl border border-dashed border-slate-300 bg-white px-5 py-6 text-center text-sm text-slate-500">
+                No email address for this investor yet.{" "}
+                <button type="button" onClick={() => setIsEditingDetails(true)} className="font-medium text-indigo-600 hover:underline">
+                  Add one
+                </button>{" "}
+                to start emailing.
               </section>
             )}
 
@@ -330,6 +433,90 @@ export function InvestorProfilePage({ id, initialCompose }: { id: string; initia
           <aside className="space-y-5">
             {investor && (
               <>
+                <Card
+                  title="Contact & details"
+                  action={!isEditingDetails && <PencilButton label="Edit details" onClick={() => setIsEditingDetails(true)} />}
+                >
+                  {isEditingDetails ? (
+                    <InvestorEditForm
+                      investor={investor}
+                      filterOptions={filterOptions}
+                      onCancel={() => setIsEditingDetails(false)}
+                      onSaved={() => {
+                        setIsEditingDetails(false);
+                        refresh();
+                      }}
+                    />
+                  ) : (
+                    <div className="-my-2 divide-y divide-slate-100">
+                      <div className="flex items-center gap-3 py-2">
+                        <div className="flex h-10 w-10 items-center justify-center rounded-full bg-indigo-100 text-sm font-semibold text-indigo-700">
+                          {initials(investor.first_name, investor.last_name)}
+                        </div>
+                        <div className="min-w-0 text-sm">
+                          <div className="truncate font-medium text-slate-900">{name || "—"}</div>
+                          <div className="truncate text-slate-500">{investor.title || "No title"}</div>
+                        </div>
+                      </div>
+                      {investor.email && (
+                        <InfoRow label="Email" source={sources.email}>
+                          <span className="flex items-center justify-between">
+                            <button type="button" onClick={focusComposer} className="truncate text-indigo-600 hover:underline">
+                              {investor.email}
+                            </button>
+                            <CopyButton value={investor.email} label="email" />
+                          </span>
+                        </InfoRow>
+                      )}
+                      {investor.linkedin && (
+                        <InfoRow label="LinkedIn" source={sources.linkedin}>
+                          <span className="flex items-center justify-between">
+                            {linkedinUrl ? (
+                              <button type="button" onClick={showLinkedIn} className="flex items-center gap-1.5 text-indigo-600 hover:underline">
+                                <LinkedInIcon className="h-3.5 w-3.5 text-[#0a66c2]" />
+                                Open beside portal
+                              </button>
+                            ) : (
+                              <ExternalLink value={investor.linkedin} label="View profile ↗" />
+                            )}
+                            <CopyButton value={investor.linkedin} label="LinkedIn URL" />
+                          </span>
+                          {popupBlocked && (
+                            <span className="mt-1 block text-xs text-amber-700">
+                              Your browser blocked the window. Allow pop-ups for this site, or{" "}
+                              <ExternalLink value={investor.linkedin} label="open it in a new tab" />.
+                            </span>
+                          )}
+                        </InfoRow>
+                      )}
+                      {investor.title && <InfoRow label="Title" source={sources.title}>{investor.title}</InfoRow>}
+                      {investor.company_name && <InfoRow label="Company" source={sources.company_name}>{investor.company_name}</InfoRow>}
+                      {investor.industry && <InfoRow label="Industry" source={sources.industry}>{investor.industry}</InfoRow>}
+                      {investor.website && (
+                        <InfoRow label="Website" source={sources.website}>
+                          <span className="flex items-center justify-between">
+                            <ExternalLink value={investor.website} label={investor.website} />
+                            <CopyButton value={investor.website} label="website" />
+                          </span>
+                        </InfoRow>
+                      )}
+                      {investor.company_linkedin_url && (
+                        <InfoRow label="Company LinkedIn" source={sources.company_linkedin_url}>
+                          <span className="flex items-center justify-between">
+                            <ExternalLink value={investor.company_linkedin_url} label="View company page ↗" />
+                            <CopyButton value={investor.company_linkedin_url} label="company LinkedIn URL" />
+                          </span>
+                        </InfoRow>
+                      )}
+                      {(investor.city || investor.country) && (
+                        <InfoRow label="Location" source={sources.city ?? sources.country}>
+                          {[investor.city, investor.country].filter(Boolean).join(", ")}
+                        </InfoRow>
+                      )}
+                    </div>
+                  )}
+                </Card>
+
                 <Card title="Team score">
                   <TeamScoreBadge investor={investor} size="md" />
                   <ul className="mt-3 space-y-1.5">
@@ -356,63 +543,14 @@ export function InvestorProfilePage({ id, initialCompose }: { id: string; initia
                   <p className="mt-3 text-xs text-slate-400">Average of every company&apos;s rating (High 3 · Medium 2 · Low 1).</p>
                 </Card>
 
-                <Card
-                  title="Investor"
-                  action={!isEditingDetails && <PencilButton label="Edit details" onClick={() => setIsEditingDetails(true)} />}
-                >
-                  {isEditingDetails ? (
-                    <InvestorEditForm
-                      investor={investor}
-                      filterOptions={filterOptions}
-                      onCancel={() => setIsEditingDetails(false)}
-                      onSaved={() => {
-                        setIsEditingDetails(false);
-                        refresh();
-                      }}
-                    />
-                  ) : (
-                    <div className="-my-2 divide-y divide-slate-100">
-                      <div className="flex items-center gap-3 py-2">
-                        <div className="flex h-10 w-10 items-center justify-center rounded-full bg-indigo-100 text-sm font-semibold text-indigo-700">
-                          {initials(investor.first_name, investor.last_name)}
-                        </div>
-                        <div className="min-w-0 text-sm">
-                          <div className="truncate font-medium text-slate-900">{name || "—"}</div>
-                          <div className="truncate text-slate-500">{investor.title || "No title"}</div>
-                        </div>
-                      </div>
-                      {investor.company_name && <InfoRow label="Company" source={sources.company_name}>{investor.company_name}</InfoRow>}
-                      {investor.industry && <InfoRow label="Industry" source={sources.industry}>{investor.industry}</InfoRow>}
-                      {investor.email && (
-                        <InfoRow label="Email" source={sources.email}>
-                          <button type="button" onClick={() => openComposer(investor)} className="text-indigo-600 hover:underline">
-                            {investor.email}
-                          </button>
-                        </InfoRow>
-                      )}
-                      {investor.linkedin && <InfoRow label="LinkedIn" source={sources.linkedin}><ExternalLink value={investor.linkedin} label="View profile ↗" /></InfoRow>}
-                      {investor.website && <InfoRow label="Website" source={sources.website}><ExternalLink value={investor.website} label={investor.website} /></InfoRow>}
-                      {investor.company_linkedin_url && (
-                        <InfoRow label="Company LinkedIn" source={sources.company_linkedin_url}>
-                          <ExternalLink value={investor.company_linkedin_url} label="View company page ↗" />
-                        </InfoRow>
-                      )}
-                      {(investor.city || investor.country) && (
-                        <InfoRow label="Location" source={sources.city ?? sources.country}>
-                          {[investor.city, investor.country].filter(Boolean).join(", ")}
-                        </InfoRow>
-                      )}
-                    </div>
-                  )}
-                </Card>
-
                 <NotesCard investorId={investor.id} notes={investor.notes} onSaved={handleCompanyDataSaved} />
                 <TagsCard investorId={investor.id} tags={investor.tags} onSaved={handleCompanyDataSaved} />
 
                 <Card title={`${companyName(user.companyId)} engagement`}>
-                  <dl className="grid grid-cols-3 gap-3 text-center">
+                  <dl className="grid grid-cols-2 gap-3 text-center">
                     {[
                       { label: "Sent", value: stats?.emailsSent ?? 0 },
+                      { label: "Opened", value: stats?.emailsOpened ?? 0 },
                       { label: "Received", value: stats?.emailsReceived ?? 0 },
                       { label: "Comments", value: stats?.comments ?? 0 },
                     ].map((item) => (
@@ -452,7 +590,7 @@ export function InvestorProfilePage({ id, initialCompose }: { id: string; initia
           onClose={() => setViewingEmailId(null)}
           onReply={(email: EmailMessage) => {
             setViewingEmailId(null);
-            if (investor) openComposer(investor, buildReplyDefaults(email), "Reply");
+            openComposer(buildReplyDefaults(email), "Reply");
           }}
         />
       )}

@@ -100,20 +100,28 @@ export async function POST(request: NextRequest) {
       // Skip leads already in the database (or repeated in this chunk) by email or LinkedIn.
       const emails = rows.map((row) => row.email).filter((email): email is string => Boolean(email));
       const linkedins = rows.map((row) => row.linkedin?.toLowerCase()).filter((url): url is string => Boolean(url));
-      const existing = await client.query<{ email: string | null; linkedin: string | null }>(
-        `SELECT lower(email) AS email, lower(linkedin) AS linkedin FROM investors
+      const existing = await client.query<{ id: string; email: string | null; linkedin: string | null }>(
+        `SELECT id, lower(email) AS email, lower(linkedin) AS linkedin FROM investors
          WHERE lower(email) = ANY($1::text[]) OR lower(linkedin) = ANY($2::text[])`,
         [emails, linkedins]
       );
       const seenEmails = new Set(existing.rows.map((row) => row.email).filter(Boolean));
       const seenLinkedins = new Set(existing.rows.map((row) => row.linkedin).filter(Boolean));
+      const existingIdByKey = new Map<string, string>();
+      for (const row of existing.rows) {
+        if (row.email) existingIdByKey.set(row.email, row.id);
+        if (row.linkedin) existingIdByKey.set(row.linkedin, row.id);
+      }
 
       const fresh: LeadRow[] = [];
+      const duplicateIds = new Set<string>();
       let duplicates = 0;
       for (const row of rows) {
         const linkedin = row.linkedin?.toLowerCase();
         if ((row.email && seenEmails.has(row.email)) || (linkedin && seenLinkedins.has(linkedin))) {
           duplicates += 1;
+          const match = (row.email && existingIdByKey.get(row.email)) || (linkedin && existingIdByKey.get(linkedin));
+          if (match && duplicateIds.size < MAX_ROWS_PER_REQUEST) duplicateIds.add(match);
           continue;
         }
         if (row.email) seenEmails.add(row.email);
@@ -157,14 +165,29 @@ export async function POST(request: NextRequest) {
         [importId, insertedIds.length, duplicates, invalid]
       );
 
-      return { id: importId!, total: body.rows.length, inserted: insertedIds.length, duplicates, invalid };
+      return {
+        id: importId!,
+        total: body.rows.length,
+        inserted: insertedIds.length,
+        duplicates,
+        invalid,
+        insertedIds: insertedIds.map((row) => row.id),
+        duplicateIds: Array.from(duplicateIds),
+      };
     });
 
     invalidateCache(TOTAL_COUNT_CACHE_KEY);
     invalidateCache(FILTER_OPTIONS_CACHE_KEY);
     auditLater(request, session, {
       action: "leads_uploaded",
-      details: { importId: summary.id, fileName, ...summary },
+      details: {
+        importId: summary.id,
+        fileName,
+        total: summary.total,
+        inserted: summary.inserted,
+        duplicates: summary.duplicates,
+        invalid: summary.invalid,
+      },
     });
 
     const response: LeadImportSummary = summary;

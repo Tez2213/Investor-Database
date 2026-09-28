@@ -2,6 +2,8 @@ import { NextResponse, type NextRequest } from "next/server";
 import { SESSION_COOKIE } from "./lib/auth/constants";
 
 const PUBLIC_PATHS = ["/login", "/api/auth/login"];
+/** Email open-tracking images are loaded by recipients' mail apps, which have no session. */
+const PUBLIC_PREFIXES = ["/api/o/"];
 
 /**
  * Fast first gate: without a session cookie, pages redirect to /login and API
@@ -10,6 +12,7 @@ const PUBLIC_PATHS = ["/login", "/api/auth/login"];
 export function proxy(request: NextRequest) {
   const { pathname, search } = request.nextUrl;
   if (PUBLIC_PATHS.some((path) => pathname === path)) return NextResponse.next();
+  if (PUBLIC_PREFIXES.some((prefix) => pathname.startsWith(prefix))) return NextResponse.next();
   if (request.cookies.has(SESSION_COOKIE)) return NextResponse.next();
 
   if (pathname.startsWith("/api/")) {

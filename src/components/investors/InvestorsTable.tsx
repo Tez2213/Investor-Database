@@ -13,7 +13,10 @@ type InvestorsTableProps = {
   hasMore: boolean;
   error: string | null;
   onRetry: () => void;
-  onSelect: (investor: Investor) => void;
+  /** Opens the investor's page (the event tells whether Cmd/Ctrl was held). */
+  onOpen: (investor: Investor, event: React.MouseEvent) => void;
+  /** Lets the page start loading the profile before the click. */
+  onHover?: (investor: Investor) => void;
   sentinelRef: (node: HTMLTableRowElement | null) => void;
   checkedIds: ReadonlySet<Investor["id"]>;
   onToggleChecked: (investor: Investor) => void;
@@ -49,7 +52,8 @@ export function InvestorsTable({
   hasMore,
   error,
   onRetry,
-  onSelect,
+  onOpen,
+  onHover,
   sentinelRef,
   checkedIds,
   onToggleChecked,
@@ -160,7 +164,8 @@ export function InvestorsTable({
                 <tr
                   key={investor.id}
                   ref={isLast ? sentinelRef : null}
-                  onClick={() => onSelect(investor)}
+                  onClick={(event) => onOpen(investor, event)}
+                  onMouseEnter={() => onHover?.(investor)}
                   className={`cursor-pointer border-b border-slate-100 transition-colors ${
                     isChecked ? "bg-indigo-50/60" : "hover:bg-indigo-50/40"
                   }`}

@@ -34,8 +34,9 @@ export async function GET(
                 (SELECT min(id) FROM investors WHERE id > $1) AS next_id`,
         [id]
       ),
-      pool.query<{ sent: string; received: string; comments: string; last_email_at: string | null }>(
+      pool.query<{ sent: string; opened: string; received: string; comments: string; last_email_at: string | null }>(
         `SELECT count(*) FILTER (WHERE kind = 'email_sent') AS sent,
+                count(*) FILTER (WHERE kind = 'email_opened') AS opened,
                 count(*) FILTER (WHERE kind = 'email_received') AS received,
                 count(*) FILTER (WHERE kind = 'comment') AS comments,
                 max(created_at) FILTER (WHERE kind IN ('email_sent', 'email_received')) AS last_email_at
@@ -57,6 +58,7 @@ export async function GET(
       nextId: neighbours.rows[0].next_id,
       stats: {
         emailsSent: Number(counts.sent),
+        emailsOpened: Number(counts.opened),
         emailsReceived: Number(counts.received),
         comments: Number(counts.comments),
         lastEmailAt: counts.last_email_at,

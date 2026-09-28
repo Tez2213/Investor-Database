@@ -9,6 +9,7 @@ import { appendToSent } from "../../../lib/mail/imap";
 import { isSmtpConfigured, sendEmail } from "../../../lib/mail/send";
 import { findInvestorIdsByAddresses, insertEmail } from "../../../lib/mail/store";
 import { cleanAddressList, renderTemplate, textToHtml } from "../../../lib/mail/text";
+import { newOpenToken, publicBaseUrl, withOpenPixel } from "../../../lib/mail/tracking";
 import type { EmailSummary } from "../../../lib/types";
 
 const PAGE_SIZE = 50;
@@ -156,13 +157,17 @@ export async function POST(request: NextRequest) {
     const renderedSubject = renderTemplate(subject, investor ?? null);
     const renderedText = renderTemplate(text, investor ?? null);
     const html = textToHtml(renderedText);
+    // The recipient's copy carries an invisible image that reports when it is
+    // opened; the copy stored here stays clean so viewing it never counts.
+    const baseUrl = publicBaseUrl(request);
+    const openToken = baseUrl ? newOpenToken() : null;
 
     const sent = await sendEmail(companyId, {
       to,
       cc,
       subject: renderedSubject,
       text: renderedText,
-      html,
+      html: baseUrl && openToken ? withOpenPixel(html, baseUrl, openToken) : html,
       inReplyTo: parent?.message_id ?? null,
       references: parent ? Array.from(new Set([parent.thread_id, parent.message_id])) : [],
     });
@@ -196,6 +201,7 @@ export async function POST(request: NextRequest) {
         sentBy: actor,
         isRead: true,
         occurredAt: new Date(),
+        openToken: sent.error ? null : openToken,
       });
 
       await logActivities(

@@ -12,13 +12,13 @@ import type {
 } from "../../lib/types";
 import { SOURCE_STYLES, formatCount, investorCode } from "../../lib/format";
 import { downloadCsv, investorsToCsv } from "../../lib/csv";
+import { restoreInvestorList, saveInvestorList } from "../../lib/investorListCache";
 import { track } from "../../lib/track";
 import { useDebouncedValue } from "../../lib/useDebouncedValue";
 import { AppHeader } from "../AppHeader";
 import { BulkActionsMenu } from "./BulkActionsMenu";
 import { FilterBar } from "./FilterBar";
 import { InvestorsTable } from "./InvestorsTable";
-import { InvestorDrawer } from "./InvestorDrawer";
 
 type NonSearchFilters = Omit<InvestorFilters, "search">;
 
@@ -78,7 +78,6 @@ export function InvestorDashboard() {
   const [isInitialLoading, setIsInitialLoading] = useState(true);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [selectedInvestor, setSelectedInvestor] = useState<Investor | null>(null);
   const [filterOptions, setFilterOptions] = useState<FilterOptions | null>(null);
   const [totalInvestors, setTotalInvestors] = useState<number | null>(null);
   // Checked rows persist across searches so a list can be built from several queries.
@@ -135,12 +134,24 @@ export function InvestorDashboard() {
 
   // Reload whenever the filters change, and keep the URL in sync so searches
   // and filters are shareable and survive a refresh.
+  const isFirstLoadRef = useRef(true);
   useEffect(() => {
-    cursorRef.current = 0;
     loadingMoreRef.current = false;
-    // Data-fetching-on-dependency-change effect (react.dev/learn/synchronizing-with-effects#fetching-data).
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    fetchPage(effectiveFilters, 0, true);
+    const saved = isFirstLoadRef.current ? restoreInvestorList(filtersKey) : null;
+    isFirstLoadRef.current = false;
+    if (saved) {
+      // Back from a profile: show the same rows at the same scroll position.
+      cursorRef.current = saved.cursor;
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- restoring the list saved on the way out
+      setInvestors(saved.investors);
+      setHasMore(saved.hasMore);
+      setIsInitialLoading(false);
+      requestAnimationFrame(() => window.scrollTo(0, saved.scrollY));
+    } else {
+      cursorRef.current = 0;
+      // Data-fetching-on-dependency-change effect (react.dev/learn/synchronizing-with-effects#fetching-data).
+      fetchPage(effectiveFilters, 0, true);
+    }
 
     const query = buildParams(effectiveFilters, 0);
     query.delete("limit");
@@ -150,6 +161,26 @@ export function InvestorDashboard() {
   }, [filtersKey]);
 
   useEffect(() => () => abortRef.current?.abort(), []);
+
+  // Remember the list when leaving the page (e.g. opening a profile).
+  const listStateRef = useRef({ filtersKey, investors, hasMore, isInitialLoading, error });
+  useEffect(() => {
+    listStateRef.current = { filtersKey, investors, hasMore, isInitialLoading, error };
+  });
+  useEffect(
+    () => () => {
+      const state = listStateRef.current;
+      if (state.isInitialLoading || state.error) return;
+      saveInvestorList({
+        filtersKey: state.filtersKey,
+        investors: state.investors,
+        cursor: cursorRef.current,
+        hasMore: state.hasMore,
+        scrollY: window.scrollY,
+      });
+    },
+    []
+  );
 
   const loadFilterOptions = useCallback(() => {
     fetch("/api/investors/filters")
@@ -166,7 +197,7 @@ export function InvestorDashboard() {
       .catch(() => undefined);
   }, [loadFilterOptions]);
 
-  // Swap freshly saved rows into the list, the selection and the open drawer.
+  // Swap freshly saved rows into the list and the selection.
   const applyUpdatedInvestors = useCallback((rows: Investor[]) => {
     const updated = new Map<Investor["id"], Investor>(rows.map((investor) => [investor.id, investor]));
     setInvestors((previous) => previous.map((investor) => updated.get(investor.id) ?? investor));
@@ -178,16 +209,7 @@ export function InvestorDashboard() {
       }
       return next;
     });
-    setSelectedInvestor((current) => (current ? updated.get(current.id) ?? current : current));
   }, []);
-
-  const handleInvestorSaved = useCallback(
-    (updated: Investor) => {
-      applyUpdatedInvestors([updated]);
-      loadFilterOptions();
-    },
-    [applyUpdatedInvestors, loadFilterOptions]
-  );
 
   const handleToggleChecked = useCallback((investor: Investor) => {
     setChecked((previous) => {
@@ -307,7 +329,15 @@ export function InvestorDashboard() {
 
   const checkedIds = useMemo(() => new Set(checked.keys()), [checked]);
 
-  const handleCloseDrawer = useCallback(() => setSelectedInvestor(null), []);
+  // A row opens the investor's full page; Cmd/Ctrl-click opens it in a new tab.
+  const handleOpenInvestor = useCallback(
+    (investor: Investor, event: React.MouseEvent) => {
+      const href = `/investors/${investor.id}`;
+      if (event.metaKey || event.ctrlKey) window.open(href, "_blank", "noopener");
+      else router.push(href);
+    },
+    [router]
+  );
 
   const loadMore = useCallback(() => {
     if (loadingMoreRef.current || isInitialLoading || !hasMore) return;
@@ -377,7 +407,7 @@ export function InvestorDashboard() {
         </div>
       )}
 
-      <div className="mx-auto max-w-[1600px] px-6 py-6">
+      <div className="mx-auto max-w-[1600px] animate-page-in px-6 py-6">
         <div className="mb-6">
           <FilterBar
             searchInput={searchInput}
@@ -443,7 +473,8 @@ export function InvestorDashboard() {
             hasMore={hasMore}
             error={error}
             onRetry={() => fetchPage(effectiveFilters, 0, true)}
-            onSelect={setSelectedInvestor}
+            onOpen={handleOpenInvestor}
+            onHover={(investor) => router.prefetch(`/investors/${investor.id}`)}
             sentinelRef={sentinelRef}
             checkedIds={checkedIds}
             onToggleChecked={handleToggleChecked}
@@ -452,13 +483,6 @@ export function InvestorDashboard() {
           />
         </div>
       </div>
-
-      <InvestorDrawer
-        investor={selectedInvestor}
-        filterOptions={filterOptions}
-        onClose={handleCloseDrawer}
-        onSaved={handleInvestorSaved}
-      />
     </div>
   );
 }

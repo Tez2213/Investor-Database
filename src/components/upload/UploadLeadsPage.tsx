@@ -9,6 +9,7 @@ import { EDITABLE_FIELDS, type EditableInvestorField, type LeadImportSummary } f
 import { AppHeader } from "../AppHeader";
 import { useSession } from "../SessionProvider";
 import { SourceWatermark } from "../investors/Badges";
+import { ManualLeadForm } from "./ManualLeadForm";
 
 type TargetField = EditableInvestorField | "quality" | "full_name" | "";
 
@@ -84,6 +85,7 @@ export function UploadLeadsPage() {
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
   const [result, setResult] = useState<Omit<LeadImportSummary, "id"> & { id: string | null } | null>(null);
   const [history, setHistory] = useState<ImportHistoryRow[]>([]);
+  const [mode, setMode] = useState<"manual" | "csv">("manual");
 
   const loadHistory = useCallback(() => {
     fetch("/api/leads/import")
@@ -176,9 +178,9 @@ export function UploadLeadsPage() {
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900">
       <AppHeader />
-      <div className="mx-auto max-w-[1100px] space-y-6 px-6 py-6">
+      <div className="mx-auto max-w-[1100px] animate-page-in space-y-6 px-6 py-6">
         <div>
-          <h1 className="text-xl font-semibold tracking-tight">Upload leads</h1>
+          <h1 className="text-xl font-semibold tracking-tight">Add leads</h1>
           <p className="mt-1 text-sm text-slate-500">
             New leads are shared with every company and carry a{" "}
             <SourceWatermark companyId={user.companyId} /> watermark. Leads already in the database (same email or
@@ -186,7 +188,29 @@ export function UploadLeadsPage() {
           </p>
         </div>
 
-        {result && (
+        <div className="flex w-fit rounded-xl border border-slate-200 bg-white p-1 text-sm font-medium shadow-sm">
+          {(
+            [
+              { id: "manual", label: "Add one lead" },
+              { id: "csv", label: "Upload a CSV file" },
+            ] as const
+          ).map((tab) => (
+            <button
+              key={tab.id}
+              type="button"
+              onClick={() => setMode(tab.id)}
+              className={`rounded-lg px-4 py-1.5 transition-colors ${
+                mode === tab.id ? "bg-slate-900 text-white" : "text-slate-500 hover:text-slate-900"
+              }`}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
+
+        {mode === "manual" && <ManualLeadForm companyName={company?.name ?? "your company"} onAdded={loadHistory} />}
+
+        {mode === "csv" && result && (
           <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-5 py-4 text-sm text-emerald-900">
             <div className="font-semibold">Upload complete</div>
             <div className="mt-1">
@@ -201,9 +225,9 @@ export function UploadLeadsPage() {
           </div>
         )}
 
-        {error && <div className="rounded-2xl border border-rose-200 bg-rose-50 px-5 py-3 text-sm text-rose-700">{error}</div>}
+        {mode === "csv" && error && <div className="rounded-2xl border border-rose-200 bg-rose-50 px-5 py-3 text-sm text-rose-700">{error}</div>}
 
-        {rows.length === 0 ? (
+        {mode === "csv" && (rows.length === 0 ? (
           <label
             onDragOver={(event) => {
               event.preventDefault();
@@ -350,7 +374,7 @@ export function UploadLeadsPage() {
               )}
             </section>
           </div>
-        )}
+        ))}
 
         <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
           <h2 className="mb-3 text-base font-semibold">Upload history</h2>

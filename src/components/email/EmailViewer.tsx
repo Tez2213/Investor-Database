@@ -1,11 +1,11 @@
 "use client";
 
-import Link from "next/link";
 import { useEffect, useState } from "react";
 import type { EmailMessage } from "../../lib/types";
 import { formatDateTime } from "../../lib/format";
 import { notifyMailChanged } from "../AppHeader";
 import { EmailBody } from "./EmailBody";
+import { InvestorChip } from "./InvestorChip";
 
 type EmailViewerProps = {
   emailId: string;
@@ -40,6 +40,11 @@ function MessageCard({
           <div className="flex items-center gap-2">
             <span className="truncate text-sm font-semibold text-slate-900">{sender}</span>
             <EmailStatusBadge email={email} />
+            {email.direction === "outbound" && email.opened_at && (
+              <span className="rounded-full bg-teal-50 px-2 py-0.5 text-xs font-medium text-teal-700 ring-1 ring-teal-200">
+                Opened{email.open_count > 1 ? ` ${email.open_count}×` : ""}
+              </span>
+            )}
           </div>
           {expanded ? (
             <div className="mt-0.5 space-y-0.5 text-xs text-slate-500">
@@ -109,9 +114,9 @@ export function EmailViewer({ emailId, onClose, onReply }: EmailViewerProps) {
           <div className="min-w-0">
             <div className="text-base font-semibold text-slate-900">{email?.subject || (error ? "Email" : "Loading…")}</div>
             {email?.investor_id && (
-              <Link href={`/investors/${email.investor_id}`} className="text-sm text-indigo-600 hover:underline">
-                {email.investor_name || "View investor"} →
-              </Link>
+              <div className="mt-1.5">
+                <InvestorChip id={email.investor_id} name={email.investor_name} />
+              </div>
             )}
           </div>
           <div className="flex shrink-0 items-center gap-2">
