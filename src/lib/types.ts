@@ -200,6 +200,10 @@ export type EmailSummary = {
   /** First time the recipient opened it (sent emails with open tracking only). */
   opened_at: string | null;
   open_count: number;
+  /** A sent email that later came back as "delivery failed". */
+  bounced_at: string | null;
+  /** Incoming mail that isn't a real reply. */
+  inbound_kind: "bounce" | "auto_reply" | null;
   investor_name?: string | null;
 };
 
@@ -241,11 +245,18 @@ export type EmailTemplate = {
 
 export type EmailStats = {
   days: number;
+  /** "mine": emails the signed-in person sent and the replies to them; "team": the whole company. */
+  scope: "mine" | "team";
+  /** Accepted by the mail server. */
   sent: number;
+  /** Sent and not bounced back. */
+  delivered: number;
+  /** Refused when sending, or bounced afterwards. */
   failed: number;
-  /** Sent emails that carried the open-tracking image. */
+  /** Delivered emails that carried the open-tracking image. */
   tracked: number;
   opened: number;
+  /** Incoming mail, excluding bounce notices. */
   received: number;
   investorsContacted: number;
   investorsReplied: number;

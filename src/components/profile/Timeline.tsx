@@ -70,6 +70,13 @@ function ViewEmailButton({ emailId, onViewEmail }: { emailId: string | null; onV
 
 /** "Opened 2×" / "Not opened yet" under a sent email; nothing for untracked emails. */
 function OpenStatus({ email }: { email: NonNullable<Activity["email"]> }) {
+  if (email.bounced_at) {
+    return (
+      <span className="mt-1 inline-flex items-center rounded-full bg-rose-50 px-2 py-0.5 text-xs font-medium text-rose-700 ring-1 ring-inset ring-rose-200">
+        Not delivered
+      </span>
+    );
+  }
   if (email.opened_at) {
     return (
       <span className="mt-1 inline-flex items-center gap-1 rounded-full bg-teal-50 px-2 py-0.5 text-xs font-medium text-teal-700 ring-1 ring-inset ring-teal-200">

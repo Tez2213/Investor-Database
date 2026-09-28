@@ -32,6 +32,10 @@ export type NewEmail = {
   occurredAt: Date;
   /** Set on emails sent from the portal with an open-tracking image. */
   openToken?: string | null;
+  /** The person who sent it from the portal. */
+  sentByUserId?: string | null;
+  /** Incoming mail that isn't a real reply. */
+  inboundKind?: "bounce" | "auto_reply" | null;
 };
 
 /** Inserts an email; returns its id, or null if this company already has that Message-ID. */
@@ -39,8 +43,9 @@ export async function insertEmail(db: Queryable, email: NewEmail): Promise<strin
   const result = await db.query<{ id: string }>(
     `INSERT INTO emails (investor_id, direction, status, from_address, from_name, to_addresses, cc_addresses,
                          subject, text_body, html_body, snippet, message_id, in_reply_to, thread_id, error,
-                         sent_by, mailbox, imap_uid, is_read, occurred_at, company_id, open_token)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22)
+                         sent_by, mailbox, imap_uid, is_read, occurred_at, company_id, open_token,
+                         sent_by_user_id, inbound_kind)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24)
      ON CONFLICT (company_id, message_id) DO NOTHING
      RETURNING id`,
     [
@@ -66,6 +71,8 @@ export async function insertEmail(db: Queryable, email: NewEmail): Promise<strin
       email.occurredAt,
       email.companyId,
       email.openToken ?? null,
+      email.sentByUserId ?? null,
+      email.inboundKind ?? null,
     ]
   );
   return result.rows[0]?.id ?? null;

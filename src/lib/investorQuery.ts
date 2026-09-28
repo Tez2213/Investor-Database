@@ -41,7 +41,7 @@ export function investorSelect(companyParam: string, extraColumns = ""): string 
              max(e.occurred_at) FILTER (WHERE e.direction = 'outbound' AND e.status = 'sent') AS last_mailed_at,
              (array_agg(coalesce(nullif(e.sent_by, 'Mailbox'), e.from_name, e.sent_by) ORDER BY e.occurred_at DESC)
                FILTER (WHERE e.direction = 'outbound' AND e.status = 'sent'))[1] AS last_mailed_by,
-             bool_or(e.direction = 'inbound') AS has_replied
+             bool_or(e.direction = 'inbound' AND e.inbound_kind IS NULL) AS has_replied
       FROM emails e
       WHERE e.investor_id = i.id AND e.company_id = ${companyParam}
     ) outreach ON true`;
@@ -73,7 +73,7 @@ export function outreachCondition(value: string, companyParam: string): string |
     case "no":
       return `NOT EXISTS (${sent})`;
     case "replied":
-      return `EXISTS (SELECT 1 FROM emails e WHERE e.investor_id = i.id AND e.company_id = ${companyParam} AND e.direction = 'inbound')`;
+      return `EXISTS (SELECT 1 FROM emails e WHERE e.investor_id = i.id AND e.company_id = ${companyParam} AND e.direction = 'inbound' AND e.inbound_kind IS NULL)`;
     default:
       return null;
   }

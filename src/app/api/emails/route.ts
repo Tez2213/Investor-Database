@@ -23,7 +23,7 @@ const FOLDER_CONDITIONS: Record<string, string> = {
   all: "TRUE",
   inbox: "e.direction = 'inbound'",
   sent: "e.direction = 'outbound' AND e.status = 'sent'",
-  failed: "e.status = 'failed'",
+  failed: "(e.status = 'failed' OR e.bounced_at IS NOT NULL)",
   unread: "e.direction = 'inbound' AND NOT e.is_read",
   unmatched: "e.investor_id IS NULL",
 };
@@ -226,6 +226,7 @@ export async function POST(request: NextRequest) {
         threadId: parent?.thread_id ?? sent.messageId,
         error: sent.error,
         sentBy: actor,
+        sentByUserId: session.userId,
         isRead: true,
         occurredAt: new Date(),
         openToken: sent.error ? null : openToken,

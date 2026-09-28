@@ -18,7 +18,7 @@ const FOLDERS = [
   { id: "inbox", label: "Inbox" },
   { id: "unread", label: "Unread" },
   { id: "sent", label: "Sent" },
-  { id: "failed", label: "Failed" },
+  { id: "failed", label: "Not delivered" },
   { id: "unmatched", label: "Not linked to an investor" },
   { id: "all", label: "All mail" },
 ] as const;
@@ -264,7 +264,13 @@ export function InboxPage() {
                           <div className="mt-0.5 truncate text-xs text-slate-500">{email.snippet}</div>
                           <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
                             <EmailStatusBadge email={email} />
-                            {email.direction === "outbound" && email.status === "sent" && email.opened_at && (
+                            {email.bounced_at && (
+                              <span className="rounded-full bg-rose-50 px-2 py-0.5 text-xs font-medium text-rose-700 ring-1 ring-rose-200">Not delivered</span>
+                            )}
+                            {email.inbound_kind === "auto_reply" && (
+                              <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-500">Auto-reply</span>
+                            )}
+                            {email.direction === "outbound" && email.status === "sent" && !email.bounced_at && email.opened_at && (
                               <span className="rounded-full bg-teal-50 px-2 py-0.5 text-xs font-medium text-teal-700 ring-1 ring-teal-200">
                                 Opened{email.open_count > 1 ? ` ${email.open_count}×` : ""}
                               </span>

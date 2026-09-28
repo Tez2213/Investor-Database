@@ -16,6 +16,8 @@ export function emailSummaryColumns(alias: string): string {
     "occurred_at",
     "opened_at",
     "open_count",
+    "bounced_at",
+    "inbound_kind",
   ]
     .map((column) => `${alias}.${column}`)
     .join(", ");

@@ -126,12 +126,24 @@ async function importMessage(db: PoolClient, source: Buffer, meta: ImportMeta): 
     imapUid: meta.uid,
     isRead: meta.direction === "outbound" || meta.seen,
     occurredAt,
+    inboundKind: bounceNotice ? "bounce" : meta.direction === "inbound" && isAutoReply(parsed) ? "auto_reply" : null,
   });
   // Already stored, e.g. a message sent from the portal that is now in the Sent folder.
   if (!emailId) return false;
 
   // Rate investors from what happened: bounced → Low, a real reply → High, mail sent from the mailbox → Medium.
   if (bounced.length > 0) {
+    // The email that bounced: the latest one sent to each of these investors.
+    await db.query(
+      `UPDATE emails o SET bounced_at = $3
+       WHERE o.id IN (
+         SELECT DISTINCT ON (x.investor_id) x.id FROM emails x
+         WHERE x.company_id = $1 AND x.investor_id = ANY($2::bigint[])
+           AND x.direction = 'outbound' AND x.status = 'sent' AND x.occurred_at <= $3
+         ORDER BY x.investor_id, x.occurred_at DESC)
+       AND o.bounced_at IS NULL`,
+      [meta.companyId, bounced, occurredAt]
+    );
     await autoRateInvestors(db, {
       companyId: meta.companyId,
       investorIds: bounced,
