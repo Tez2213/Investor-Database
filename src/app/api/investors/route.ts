@@ -110,7 +110,8 @@ export async function GET(request: NextRequest) {
         website,
         company_linkedin_url,
         city,
-        country
+        country,
+        field_sources
       FROM investors
       ${whereClause}
       ORDER BY id ASC

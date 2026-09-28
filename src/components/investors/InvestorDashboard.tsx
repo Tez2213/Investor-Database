@@ -3,13 +3,16 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import type {
+  FieldSource,
   FilterOptions,
   HasFilterValue,
   Investor,
   InvestorFilters,
   InvestorsResponse,
 } from "../../lib/types";
-import { formatCount } from "../../lib/format";
+import { SOURCE_STYLES, formatCount } from "../../lib/format";
+import { downloadCsv, investorsToCsv } from "../../lib/csv";
+import { BulkActionsMenu } from "./BulkActionsMenu";
 import { useDebouncedValue } from "../../lib/useDebouncedValue";
 import { FilterBar } from "./FilterBar";
 import { InvestorsTable } from "./InvestorsTable";
@@ -68,6 +71,10 @@ export function InvestorDashboard() {
     null
   );
   const [totalInvestors, setTotalInvestors] = useState<number | null>(null);
+  // Checked rows persist across searches so a list can be built from several queries.
+  const [checked, setChecked] = useState<Map<Investor["id"], Investor>>(
+    () => new Map()
+  );
 
   const cursorRef = useRef(0);
   const loadingRef = useRef(false);
@@ -174,11 +181,15 @@ export function InvestorDashboard() {
     effectiveFilters.hasLinkedIn,
   ]);
 
-  useEffect(() => {
+  const loadFilterOptions = useCallback(() => {
     fetch("/api/investors/filters")
       .then((res) => (res.ok ? res.json() : null))
       .then((data: FilterOptions | null) => data && setFilterOptions(data))
       .catch(() => undefined);
+  }, []);
+
+  useEffect(() => {
+    loadFilterOptions();
 
     fetch("/api/stats")
       .then((res) => (res.ok ? res.json() : null))
@@ -186,7 +197,131 @@ export function InvestorDashboard() {
         data && setTotalInvestors(data.totalInvestors)
       )
       .catch(() => undefined);
+  }, [loadFilterOptions]);
+
+  const handleInvestorSaved = useCallback(
+    (updated: Investor) => {
+      setInvestors((previous) =>
+        previous.map((investor) => (investor.id === updated.id ? updated : investor))
+      );
+      setSelectedInvestor(updated);
+      setChecked((previous) => {
+        if (!previous.has(updated.id)) return previous;
+        const next = new Map(previous);
+        next.set(updated.id, updated);
+        return next;
+      });
+      loadFilterOptions();
+    },
+    [loadFilterOptions]
+  );
+
+  const handleToggleChecked = useCallback((investor: Investor) => {
+    setChecked((previous) => {
+      const next = new Map(previous);
+      if (next.has(investor.id)) next.delete(investor.id);
+      else next.set(investor.id, investor);
+      return next;
+    });
   }, []);
+
+  const handleToggleAllChecked = useCallback(() => {
+    setChecked((previous) => {
+      const next = new Map(previous);
+      const allChecked = investors.every((investor) => next.has(investor.id));
+      for (const investor of investors) {
+        if (allChecked) next.delete(investor.id);
+        else next.set(investor.id, investor);
+      }
+      return next;
+    });
+  }, [investors]);
+
+  const handleDownload = useCallback(() => {
+    const rows = Array.from(checked.values());
+    if (rows.length === 0) return;
+    const date = new Date().toISOString().slice(0, 10);
+    downloadCsv(`investors-${date}-${rows.length}.csv`, investorsToCsv(rows));
+  }, [checked]);
+
+  const [notice, setNotice] = useState<{ text: string; tone: "ok" | "error" } | null>(
+    null
+  );
+  const noticeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [isBulkSaving, setIsBulkSaving] = useState(false);
+
+  const showNotice = useCallback((text: string, tone: "ok" | "error" = "ok") => {
+    if (noticeTimerRef.current) clearTimeout(noticeTimerRef.current);
+    setNotice({ text, tone });
+    noticeTimerRef.current = setTimeout(() => setNotice(null), 3500);
+  }, []);
+
+  const copyValues = useCallback(
+    async (values: (string | null)[], label: string) => {
+      const unique = Array.from(new Set(values.filter((value): value is string => Boolean(value))));
+      if (unique.length === 0) {
+        showNotice(`None of the selected investors have ${label}.`, "error");
+        return;
+      }
+      try {
+        await navigator.clipboard.writeText(unique.join("\n"));
+        showNotice(`Copied ${unique.length.toLocaleString()} ${label} to clipboard.`);
+      } catch {
+        showNotice("Could not access the clipboard.", "error");
+      }
+    },
+    [showNotice]
+  );
+
+  const handleBulkQuality = useCallback(
+    async (quality: string | null) => {
+      const ids = Array.from(checked.keys());
+      if (ids.length === 0) return;
+
+      setIsBulkSaving(true);
+      try {
+        const response = await fetch("/api/investors/bulk-update", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ids, changes: { quality } }),
+        });
+        const result = await response.json().catch(() => null);
+        if (!response.ok) {
+          throw new Error(result?.error ?? `Update failed (status ${response.status})`);
+        }
+
+        const updated = new Map<Investor["id"], Investor>(
+          (result.data as Investor[]).map((investor) => [investor.id, investor])
+        );
+        setInvestors((previous) =>
+          previous.map((investor) => updated.get(investor.id) ?? investor)
+        );
+        setChecked((previous) => {
+          const next = new Map(previous);
+          for (const [id, investor] of updated) next.set(id, investor);
+          return next;
+        });
+        setSelectedInvestor((current) =>
+          current ? updated.get(current.id) ?? current : current
+        );
+        loadFilterOptions();
+        showNotice(
+          quality
+            ? `Set quality to "${quality}" for ${updated.size.toLocaleString()} investors.`
+            : `Cleared quality for ${updated.size.toLocaleString()} investors.`
+        );
+      } catch (err) {
+        showNotice(err instanceof Error ? err.message : "Update failed", "error");
+      } finally {
+        setIsBulkSaving(false);
+      }
+    },
+    [checked, loadFilterOptions, showNotice]
+  );
+
+  const checkedIds = useMemo(() => new Set(checked.keys()), [checked]);
+
+  const handleCloseDrawer = useCallback(() => setSelectedInvestor(null), []);
 
   const loadMore = useCallback(() => {
     if (loadingRef.current || !hasMore) return;
@@ -241,12 +376,40 @@ export function InvestorDashboard() {
             </p>
           </div>
 
-          <div className="flex items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-4 py-2 text-sm font-medium text-slate-700">
-            <span className="h-2 w-2 rounded-full bg-emerald-500" />
-            {formatCount(totalInvestors)} Investors
+          <div className="flex flex-wrap items-center justify-end gap-3">
+            <div className="flex items-center gap-3 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-600">
+              <span className="font-semibold uppercase tracking-wide text-slate-400">
+                Legend
+              </span>
+              {(Object.keys(SOURCE_STYLES) as FieldSource[]).map((source) => (
+                <span
+                  key={source}
+                  title={SOURCE_STYLES[source].description}
+                  className={`${SOURCE_STYLES[source].highlight} cursor-help font-medium`}
+                >
+                  {SOURCE_STYLES[source].label}
+                </span>
+              ))}
+            </div>
+
+            <div className="flex items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-4 py-2 text-sm font-medium text-slate-700">
+              <span className="h-2 w-2 rounded-full bg-emerald-500" />
+              {formatCount(totalInvestors)} Investors
+            </div>
           </div>
         </div>
       </header>
+
+      {notice && (
+        <div
+          role="status"
+          className={`fixed bottom-6 left-1/2 z-50 -translate-x-1/2 rounded-xl px-4 py-2.5 text-sm font-medium shadow-lg ${
+            notice.tone === "ok" ? "bg-slate-900 text-white" : "bg-rose-600 text-white"
+          }`}
+        >
+          {notice.text}
+        </div>
+      )}
 
       <div className="mx-auto max-w-[1600px] px-6 py-6">
         <div className="mb-6">
@@ -262,7 +425,7 @@ export function InvestorDashboard() {
         </div>
 
         <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm shadow-slate-900/5">
-          <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4">
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 px-5 py-4">
             <div>
               <div className="font-semibold text-slate-900">Results</div>
               <div className="text-sm text-slate-500">
@@ -273,6 +436,42 @@ export function InvestorDashboard() {
                     }`}
               </div>
             </div>
+
+            {checked.size > 0 && (
+              <div className="flex items-center gap-2">
+                <span className="rounded-full bg-indigo-50 px-3 py-1 text-sm font-medium text-indigo-700">
+                  {checked.size.toLocaleString()} selected
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setChecked(new Map())}
+                  className="rounded-lg px-3 py-1.5 text-sm font-medium text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-700"
+                >
+                  Clear
+                </button>
+                <BulkActionsMenu
+                  disabled={isBulkSaving}
+                  onCopyEmails={() =>
+                    copyValues(Array.from(checked.values(), (i) => i.email), "emails")
+                  }
+                  onCopyLinkedIn={() =>
+                    copyValues(Array.from(checked.values(), (i) => i.linkedin), "LinkedIn URLs")
+                  }
+                  onSetQuality={handleBulkQuality}
+                />
+                <button
+                  type="button"
+                  onClick={handleDownload}
+                  className="flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3.5 py-1.5 text-sm font-medium text-white shadow-sm transition-colors hover:bg-indigo-500"
+                >
+                  <svg className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+                    <path d="M10.75 2.75a.75.75 0 00-1.5 0v8.614L6.295 8.235a.75.75 0 10-1.09 1.03l4.25 4.5a.75.75 0 001.09 0l4.25-4.5a.75.75 0 00-1.09-1.03l-2.955 3.129V2.75z" />
+                    <path d="M3.5 12.75a.75.75 0 00-1.5 0v2.5A2.75 2.75 0 004.75 18h10.5A2.75 2.75 0 0018 15.25v-2.5a.75.75 0 00-1.5 0v2.5c0 .69-.56 1.25-1.25 1.25H4.75c-.69 0-1.25-.56-1.25-1.25v-2.5z" />
+                  </svg>
+                  Download CSV
+                </button>
+              </div>
+            )}
           </div>
 
           <InvestorsTable
@@ -284,13 +483,18 @@ export function InvestorDashboard() {
             onRetry={() => fetchPage(effectiveFilters, 0, true)}
             onSelect={setSelectedInvestor}
             sentinelRef={sentinelRef}
+            checkedIds={checkedIds}
+            onToggleChecked={handleToggleChecked}
+            onToggleAllChecked={handleToggleAllChecked}
           />
         </div>
       </div>
 
       <InvestorDrawer
         investor={selectedInvestor}
-        onClose={() => setSelectedInvestor(null)}
+        filterOptions={filterOptions}
+        onClose={handleCloseDrawer}
+        onSaved={handleInvestorSaved}
       />
     </div>
   );

@@ -12,7 +12,31 @@ export type Investor = {
   company_linkedin_url: string | null;
   city: string | null;
   country: string | null;
+  field_sources: FieldSources;
 };
+
+export type FieldSource = "predicted" | "edited";
+
+export type FieldSources = Partial<Record<EditableInvestorField, FieldSource>>;
+
+export type EditableInvestorField = Exclude<keyof Investor, "id" | "field_sources">;
+
+export const QUALITY_OPTIONS = ["High", "Medium", "Low"] as const;
+
+export const EDITABLE_FIELDS: { key: EditableInvestorField; label: string }[] = [
+  { key: "first_name", label: "First name" },
+  { key: "last_name", label: "Last name" },
+  { key: "title", label: "Title" },
+  { key: "company_name", label: "Company" },
+  { key: "industry", label: "Industry" },
+  { key: "email", label: "Email" },
+  { key: "linkedin", label: "LinkedIn URL" },
+  { key: "website", label: "Website" },
+  { key: "company_linkedin_url", label: "Company LinkedIn URL" },
+  { key: "city", label: "City" },
+  { key: "country", label: "Country" },
+  { key: "quality", label: "Quality" },
+];
 
 export type InvestorsResponse = {
   data: Investor[];

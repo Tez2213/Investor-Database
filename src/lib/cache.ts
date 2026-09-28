@@ -5,6 +5,12 @@ type CacheEntry<T> = {
 
 const store = new Map<string, CacheEntry<unknown>>();
 
+export const FILTER_OPTIONS_CACHE_KEY = "investor-filter-options";
+
+export function invalidateCache(key: string) {
+  store.delete(key);
+}
+
 /**
  * Minimal in-memory TTL cache. Lives per warm serverless instance /
  * long-running process, which is enough to keep cheap, rarely-changing

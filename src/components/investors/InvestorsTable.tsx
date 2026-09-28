@@ -1,7 +1,7 @@
 "use client";
 
 import type { Investor } from "../../lib/types";
-import { fullName, initials, qualityBadgeClass } from "../../lib/format";
+import { fullName, initials, qualityBadgeClass, sourceHighlight } from "../../lib/format";
 
 type InvestorsTableProps = {
   investors: Investor[];
@@ -12,9 +12,15 @@ type InvestorsTableProps = {
   onRetry: () => void;
   onSelect: (investor: Investor) => void;
   sentinelRef: (node: HTMLTableRowElement | null) => void;
+  checkedIds: ReadonlySet<Investor["id"]>;
+  onToggleChecked: (investor: Investor) => void;
+  onToggleAllChecked: () => void;
 };
 
-const COLUMN_COUNT = 6;
+const COLUMN_COUNT = 7;
+
+const CHECKBOX_CLASS =
+  "h-4 w-4 cursor-pointer rounded border-slate-300 accent-indigo-600";
 
 function SkeletonRows() {
   return (
@@ -41,7 +47,17 @@ export function InvestorsTable({
   onRetry,
   onSelect,
   sentinelRef,
+  checkedIds,
+  onToggleChecked,
+  onToggleAllChecked,
 }: InvestorsTableProps) {
+  const checkedLoadedCount = investors.filter((investor) =>
+    checkedIds.has(investor.id)
+  ).length;
+  const allLoadedChecked =
+    investors.length > 0 && checkedLoadedCount === investors.length;
+  const someLoadedChecked = checkedLoadedCount > 0 && !allLoadedChecked;
+
   if (error) {
     return (
       <div className="flex flex-col items-center justify-center gap-3 px-6 py-20 text-center">
@@ -96,6 +112,19 @@ export function InvestorsTable({
       <table className="w-full min-w-[960px] text-left text-sm">
         <thead className="sticky top-0 z-10 border-b border-slate-200 bg-slate-50/95 text-xs font-semibold uppercase tracking-wide text-slate-500 backdrop-blur">
           <tr>
+            <th className="w-12 py-3 pl-5 pr-0">
+              <input
+                type="checkbox"
+                aria-label="Select all loaded investors"
+                className={CHECKBOX_CLASS}
+                checked={allLoadedChecked}
+                ref={(node) => {
+                  if (node) node.indeterminate = someLoadedChecked;
+                }}
+                onChange={onToggleAllChecked}
+                disabled={isInitialLoading || investors.length === 0}
+              />
+            </th>
             <th className="px-5 py-3">Investor</th>
             <th className="px-5 py-3">Company</th>
             <th className="px-5 py-3">Industry</th>
@@ -115,14 +144,31 @@ export function InvestorsTable({
                 .filter(Boolean)
                 .join(", ");
               const isLast = index === investors.length - 1;
+              const isChecked = checkedIds.has(investor.id);
+              const sources = investor.field_sources ?? {};
 
               return (
                 <tr
                   key={investor.id}
                   ref={isLast ? sentinelRef : null}
                   onClick={() => onSelect(investor)}
-                  className="cursor-pointer border-b border-slate-100 transition-colors hover:bg-indigo-50/40"
+                  className={`cursor-pointer border-b border-slate-100 transition-colors ${
+                    isChecked ? "bg-indigo-50/60" : "hover:bg-indigo-50/40"
+                  }`}
                 >
+                  <td
+                    className="w-12 py-3.5 pl-5 pr-0"
+                    onClick={(event) => event.stopPropagation()}
+                  >
+                    <input
+                      type="checkbox"
+                      aria-label={`Select ${name || "investor"}`}
+                      className={CHECKBOX_CLASS}
+                      checked={isChecked}
+                      onChange={() => onToggleChecked(investor)}
+                    />
+                  </td>
+
                   <td className="px-5 py-3.5">
                     <div className="flex items-center gap-3">
                       <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-indigo-100 text-xs font-semibold text-indigo-700">
@@ -130,25 +176,35 @@ export function InvestorsTable({
                       </div>
                       <div className="min-w-0">
                         <div className="truncate font-medium text-slate-900">
-                          {name || "—"}
+                          <span className={sourceHighlight(sources.first_name ?? sources.last_name)}>
+                            {name || "—"}
+                          </span>
                         </div>
                         <div className="truncate text-xs text-slate-500">
-                          {investor.title || "—"}
+                          <span className={sourceHighlight(sources.title)}>
+                            {investor.title || "—"}
+                          </span>
                         </div>
                       </div>
                     </div>
                   </td>
 
                   <td className="max-w-[200px] truncate px-5 py-3.5 text-slate-700">
-                    {investor.company_name || "—"}
+                    <span className={sourceHighlight(sources.company_name)}>
+                      {investor.company_name || "—"}
+                    </span>
                   </td>
 
                   <td className="max-w-[160px] truncate px-5 py-3.5 text-slate-700">
-                    {investor.industry || "—"}
+                    <span className={investor.industry ? sourceHighlight(sources.industry) : ""}>
+                      {investor.industry || "—"}
+                    </span>
                   </td>
 
                   <td className="max-w-[160px] truncate px-5 py-3.5 text-slate-700">
-                    {location || "—"}
+                    <span className={location ? sourceHighlight(sources.city ?? sources.country) : ""}>
+                      {location || "—"}
+                    </span>
                   </td>
 
                   <td className="px-5 py-3.5">
@@ -185,7 +241,7 @@ export function InvestorsTable({
                       <span
                         className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ring-1 ring-inset ${qualityBadgeClass(
                           investor.quality
-                        )}`}
+                        )} ${sources.quality === "edited" ? "outline-2 outline-offset-1 outline-sky-300" : ""}`}
                       >
                         {investor.quality}
                       </span>

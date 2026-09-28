@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { pool } from "../../../../lib/db";
-import { getOrSetCache } from "../../../../lib/cache";
-import type { FilterOptions } from "../../../../lib/types";
+import { FILTER_OPTIONS_CACHE_KEY, getOrSetCache } from "../../../../lib/cache";
+import { QUALITY_OPTIONS, type FilterOptions } from "../../../../lib/types";
 
 const CACHE_TTL_MS = 5 * 60 * 1000;
 
@@ -17,7 +17,7 @@ async function loadFilterOptions(): Promise<FilterOptions> {
       `SELECT DISTINCT industry FROM investors
        WHERE industry IS NOT NULL AND industry <> ''
        ORDER BY industry ASC
-       LIMIT 500`
+       LIMIT 2000`
     ),
     pool.query<{ quality: string }>(
       `SELECT DISTINCT quality FROM investors
@@ -30,14 +30,16 @@ async function loadFilterOptions(): Promise<FilterOptions> {
   return {
     countries: countries.rows.map((row) => row.country),
     industries: industries.rows.map((row) => row.industry),
-    qualities: qualities.rows.map((row) => row.quality),
+    qualities: Array.from(
+      new Set<string>([...QUALITY_OPTIONS, ...qualities.rows.map((row) => row.quality)])
+    ),
   };
 }
 
 export async function GET() {
   try {
     const options = await getOrSetCache(
-      "investor-filter-options",
+      FILTER_OPTIONS_CACHE_KEY,
       CACHE_TTL_MS,
       loadFilterOptions
     );
