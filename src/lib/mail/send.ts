@@ -53,7 +53,27 @@ export type SendResult = {
   raw: Buffer;
   /** Set when the SMTP server rejected the message or could not be reached. */
   error: string | null;
+  /** Recipients the mail server permanently refused (e.g. "550 no such user"). */
+  rejectedRecipients: string[];
 };
+
+/** Addresses from a nodemailer result or error that were refused permanently (5xx), not temporarily. */
+function permanentlyRejected(value: unknown): string[] {
+  const source = value as { rejected?: unknown[]; rejectedErrors?: { recipient?: string; responseCode?: number }[] } | null;
+  if (!source) return [];
+  const errors = source.rejectedErrors ?? [];
+  if (errors.length > 0) {
+    return errors
+      .filter((error) => (error.responseCode ?? 0) >= 500 && error.recipient)
+      .map((error) => error.recipient!.toLowerCase());
+  }
+  const code = (value as { responseCode?: number }).responseCode ?? 0;
+  if (code < 500) return [];
+  return (source.rejected ?? [])
+    .map((entry) => (typeof entry === "string" ? entry : (entry as { address?: string })?.address ?? ""))
+    .filter(Boolean)
+    .map((address) => address.toLowerCase());
+}
 
 /** Turns SMTP failures into something a user can act on. */
 function describeSendError(sendError: unknown): string {
@@ -95,14 +115,18 @@ export async function sendEmail(companyId: string, email: OutgoingEmail): Promis
   const raw = built.message as Buffer;
 
   let error: string | null = null;
+  let rejectedRecipients: string[] = [];
   try {
-    await getSmtpTransport(smtp).sendMail({
+    const info = await getSmtpTransport(smtp).sendMail({
       envelope: { from: sender.address, to: [...email.to, ...email.cc] },
       raw,
     });
+    // Delivered to some recipients but refused for others.
+    rejectedRecipients = permanentlyRejected(info);
   } catch (sendError) {
     error = describeSendError(sendError);
+    if ((sendError as { code?: string } | null)?.code === "EENVELOPE") rejectedRecipients = permanentlyRejected(sendError);
   }
 
-  return { messageId, fromAddress: sender.address, fromName: sender.name, raw, error };
+  return { messageId, fromAddress: sender.address, fromName: sender.name, raw, error, rejectedRecipients };
 }

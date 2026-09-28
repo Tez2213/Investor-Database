@@ -1,9 +1,10 @@
 "use client";
 
 import { useRef, useState } from "react";
-import type { EmailSetupStatus } from "../../lib/types";
+import type { EmailSetupStatus, EmailTemplate } from "../../lib/types";
 import { notifyMailChanged } from "../AppHeader";
 import type { ComposerDefaults } from "./replyDefaults";
+import { TemplatesMenu } from "./TemplatesMenu";
 
 const PLACEHOLDERS = [
   { token: "{{first_name}}", label: "First name" },
@@ -60,6 +61,27 @@ export function EmailComposer({ investorId, defaults, setup, onSent, onCancel, t
     });
   }
 
+  function applyTemplate(template: EmailTemplate) {
+    const isReply = Boolean(defaults.replyToEmailId);
+    // Replies keep their "Re:" subject so the email stays in the same thread.
+    if (template.subject && !isReply) setSubject(template.subject);
+    if (!template.body) return;
+    const untouched = body === (defaults.body ?? "") || !body.trim();
+    if (untouched) {
+      // Start from the template; on a reply keep the quoted message below it.
+      const next = isReply ? `${template.body}${defaults.body ?? ""}` : template.body;
+      setBody(next);
+      requestAnimationFrame(() => {
+        const textarea = bodyRef.current;
+        if (!textarea) return;
+        textarea.focus();
+        textarea.setSelectionRange(template.body.length, template.body.length);
+      });
+    } else {
+      insertPlaceholder(template.body);
+    }
+  }
+
   async function handleSend(event?: React.FormEvent) {
     event?.preventDefault();
     if (isSending) return;
@@ -102,13 +124,16 @@ export function EmailComposer({ investorId, defaults, setup, onSent, onCancel, t
       }}
       className="space-y-3"
     >
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between gap-3">
         <div className="text-sm font-semibold text-slate-900">{title ?? "New email"}</div>
-        {setup?.fromAddress && (
-          <div className="truncate text-xs text-slate-500">
-            From: {setup.fromName ? `${setup.fromName} <${setup.fromAddress}>` : setup.fromAddress}
-          </div>
-        )}
+        <div className="flex min-w-0 items-center gap-3">
+          {setup?.fromAddress && (
+            <div className="hidden truncate text-xs text-slate-500 sm:block">
+              From: {setup.fromName ? `${setup.fromName} <${setup.fromAddress}>` : setup.fromAddress}
+            </div>
+          )}
+          <TemplatesMenu subject={subject} body={body} onUse={applyTemplate} disabled={isSending} />
+        </div>
       </div>
 
       {notConfigured && (

@@ -230,6 +230,15 @@ export type ActivitiesResponse = {
 };
 
 /** Outreach numbers for the Inbox page. */
+/** A person's saved subject/body snippet for the email composer. */
+export type EmailTemplate = {
+  id: string;
+  name: string;
+  subject: string;
+  body: string;
+  updated_at: string;
+};
+
 export type EmailStats = {
   days: number;
   sent: number;

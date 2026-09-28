@@ -1,11 +1,12 @@
 import { createHash } from "node:crypto";
 import type { ImapFlow } from "imapflow";
-import { simpleParser, type AddressObject } from "mailparser";
+import { simpleParser, type AddressObject, type ParsedMail } from "mailparser";
 import type { PoolClient } from "pg";
 import { pool } from "../db";
 import { logActivities } from "../activity";
 import { findSentMailbox, withImap } from "./imap";
 import { findInvestorIdsByAddresses, findThread, insertEmail } from "./store";
+import { bouncedAddresses, isBounce, markUndeliverable } from "./undeliverable";
 
 /** Messages imported per folder per run; the next run continues where this one stopped. */
 const MAX_MESSAGES_PER_RUN = 200;
@@ -55,6 +56,24 @@ function htmlToText(html: string): string {
     .trim();
 }
 
+/**
+ * Investors a bounce is about: addresses it reports as failed that belong to an
+ * investor this company has actually emailed.
+ */
+async function bouncedInvestorIds(db: PoolClient, companyId: string, parsed: ParsedMail, ownAddresses: string[]): Promise<string[]> {
+  const { addresses } = bouncedAddresses(parsed, ownAddresses);
+  if (addresses.length === 0) return [];
+  const result = await db.query<{ id: string }>(
+    `SELECT DISTINCT i.id FROM investors i
+     WHERE lower(i.email) = ANY($2::text[])
+       AND EXISTS (SELECT 1 FROM emails e
+                   WHERE e.company_id = $1 AND e.direction = 'outbound'
+                     AND lower(i.email) = ANY(e.to_addresses || e.cc_addresses))`,
+    [companyId, addresses]
+  );
+  return result.rows.map((row) => row.id);
+}
+
 async function importMessage(db: PoolClient, source: Buffer, meta: ImportMeta): Promise<boolean> {
   const parsed = await simpleParser(source, { skipImageLinks: true, skipTextToHtml: true });
 
@@ -78,8 +97,10 @@ async function importMessage(db: PoolClient, source: Buffer, meta: ImportMeta): 
     meta.companyId,
     [inReplyTo, ...references].filter((id): id is string => Boolean(id))
   );
+  // A "delivery failed" notice belongs to the investors it bounced for, not the mail server that sent it.
+  const bounced = meta.direction === "inbound" && isBounce(parsed, from.address) ? await bouncedInvestorIds(db, meta.companyId, parsed, [...to, ...cc]) : [];
   const counterparts = meta.direction === "inbound" ? [from.address] : [...to, ...cc];
-  const investorIds = await findInvestorIdsByAddresses(db, counterparts);
+  const investorIds = bounced.length > 0 ? [...bounced] : await findInvestorIdsByAddresses(db, counterparts);
   if (thread?.investorId && !investorIds.includes(thread.investorId)) {
     investorIds.unshift(thread.investorId);
   }
@@ -107,6 +128,15 @@ async function importMessage(db: PoolClient, source: Buffer, meta: ImportMeta): 
   });
   // Already stored, e.g. a message sent from the portal that is now in the Sent folder.
   if (!emailId) return false;
+
+  if (bounced.length > 0) {
+    await markUndeliverable(db, {
+      companyId: meta.companyId,
+      investorIds: bounced,
+      emailId,
+      reason: `Marked Low because an email to this investor bounced: "${parsed.subject ?? "Delivery failed"}".`,
+    });
+  }
 
   await logActivities(
     db,

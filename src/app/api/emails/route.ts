@@ -11,6 +11,7 @@ import { isSmtpConfigured, sendEmail } from "../../../lib/mail/send";
 import { findInvestorIdsByAddresses, insertEmail } from "../../../lib/mail/store";
 import { cleanAddressList, renderTemplate, textToHtml } from "../../../lib/mail/text";
 import { newOpenToken, publicBaseUrl, withOpenPixel } from "../../../lib/mail/tracking";
+import { markUndeliverable } from "../../../lib/mail/undeliverable";
 import type { EmailSummary } from "../../../lib/types";
 
 const PAGE_SIZE = 50;
@@ -240,7 +241,18 @@ export async function POST(request: NextRequest) {
           emailId,
         }))
       );
-      return { id: emailId, investorIds };
+
+      // Addresses the mail server refused outright are marked Low for this company.
+      let markedLow: string[] = [];
+      if (sent.rejectedRecipients.length > 0) {
+        markedLow = await markUndeliverable(client, {
+          companyId,
+          investorIds: await findInvestorIdsByAddresses(client, sent.rejectedRecipients),
+          emailId,
+          reason: `Marked Low because the mail server refused the address (${sent.rejectedRecipients.join(", ")}).`,
+        });
+      }
+      return { id: emailId, investorIds, markedLow };
     });
 
     auditLater(request, session, {

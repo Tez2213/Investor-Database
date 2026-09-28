@@ -120,6 +120,7 @@ function ActivityContent({ activity, onViewEmail }: { activity: Activity; onView
             {actor} changed {FIELD_LABELS[change.field] ?? change.field} from <Value value={change.from} /> to{" "}
             <Value value={change.to} />
             {suffix}
+            {activity.body && <div className="mt-0.5 text-xs text-slate-500">{activity.body}</div>}
           </div>
         );
       }
