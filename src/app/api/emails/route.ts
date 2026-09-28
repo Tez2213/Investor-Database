@@ -12,6 +12,7 @@ import { findInvestorIdsByAddresses, insertEmail } from "../../../lib/mail/store
 import { cleanAddressList, renderTemplate, textToHtml } from "../../../lib/mail/text";
 import { newOpenToken, publicBaseUrl, withOpenPixel } from "../../../lib/mail/tracking";
 import { autoRateInvestors } from "../../../lib/mail/autoQuality";
+import { preflightChecks, undeliverableDomains, unfilledPlaceholders } from "../../../lib/mail/preflight";
 import type { EmailSummary } from "../../../lib/types";
 
 const PAGE_SIZE = 50;
@@ -184,6 +185,35 @@ export async function POST(request: NextRequest) {
     const renderedSubject = renderTemplate(subject, investor ?? null);
     const renderedText = renderTemplate(text, investor ?? null);
     const html = textToHtml(renderedText);
+
+    // Catch problems before the mail server sees them: every bounce or
+    // spammy-looking email makes the next ones more likely to land in spam.
+    const leftover = unfilledPlaceholders(renderedSubject, renderedText);
+    if (leftover.length > 0) {
+      return NextResponse.json(
+        { error: `${leftover.join(", ")} isn't a placeholder the portal can fill in. Use {{first_name}}, {{last_name}}, {{full_name}} or {{company}}.`, code: "placeholder" },
+        { status: 400 }
+      );
+    }
+    const recipients = Array.from(new Set([...to, ...cc]));
+    const deadAddresses = await undeliverableDomains(recipients);
+    if (deadAddresses.length > 0) {
+      return NextResponse.json(
+        { error: `${deadAddresses.join(", ")} can't receive email: the domain doesn't exist or has no mail server. Check the spelling.`, code: "bad_domain", addresses: deadAddresses },
+        { status: 400 }
+      );
+    }
+    const problem = await preflightChecks(pool, {
+      companyId,
+      recipients,
+      subject: renderedSubject,
+      allowBounced: body.allowBounced === true,
+    });
+    if (problem) {
+      const { status, ...payload } = problem;
+      return NextResponse.json(payload, { status });
+    }
+
     // The recipient's copy carries an invisible image that reports when it is
     // opened; the copy stored here stays clean so viewing it never counts.
     const baseUrl = publicBaseUrl(request);
@@ -244,6 +274,9 @@ export async function POST(request: NextRequest) {
       );
 
       // Rate the investors from the outcome: refused addresses → Low, delivered to the server → Medium.
+      if (sent.rejectedRecipients.length > 0) {
+        await client.query("UPDATE emails SET bounced_at = now(), bounced_addresses = $2 WHERE id = $1", [emailId, sent.rejectedRecipients]);
+      }
       const rejectedIds = sent.rejectedRecipients.length > 0 ? await findInvestorIdsByAddresses(client, sent.rejectedRecipients) : [];
       if (rejectedIds.length > 0) {
         await autoRateInvestors(client, {

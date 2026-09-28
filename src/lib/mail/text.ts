@@ -33,7 +33,8 @@ export function textToHtml(text: string): string {
     .split(/\n{2,}/)
     .map((paragraph) => `<p style="margin:0 0 1em">${escapeHtml(paragraph).replace(/\n/g, "<br>")}</p>`)
     .join("");
-  return `<div style="font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:1.5;color:#111">${paragraphs}</div>`;
+  // A complete document: spam filters score bare HTML fragments (no <html>/<body>) as suspicious.
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"></head><body><div style="font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:1.5;color:#111">${paragraphs}</div></body></html>`;
 }
 
 export function makeSnippet(text: string | null | undefined, length = 160): string | null {

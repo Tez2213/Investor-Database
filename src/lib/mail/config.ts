@@ -11,6 +11,11 @@ import { companyById } from "../companies";
 
 const DEFAULT_SMTP_HOST = "smtpout.secureserver.net";
 const DEFAULT_IMAP_HOST = "imap.secureserver.net";
+/**
+ * Stay well under the mailbox provider's daily cap: going over it gets the
+ * mailbox blocked for a day and hurts how often mail lands in the inbox.
+ */
+const DEFAULT_DAILY_SEND_LIMIT = 300;
 
 export type ServerConfig = {
   host: string;
@@ -38,6 +43,12 @@ function setting(prefix: string, name: string): string | undefined {
 
 function secureFlag(value: string | undefined, port: number, securePort: number): boolean {
   return value ? value !== "false" : port === securePort;
+}
+
+/** Most recipients a company's mailbox may send to in 24 hours (COMPANY_DAILY_SEND_LIMIT or DAILY_SEND_LIMIT). */
+export function dailySendLimit(companyId: string): number {
+  const company = companyById(companyId);
+  return envNumber(company ? setting(company.id.toUpperCase(), "DAILY_SEND_LIMIT") : undefined, DEFAULT_DAILY_SEND_LIMIT);
 }
 
 export function getCompanyMailConfig(companyId: string): CompanyMailConfig {

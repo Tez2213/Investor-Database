@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import type { EmailSetupStatus, EmailTemplate } from "../../lib/types";
 import { notifyMailChanged } from "../AppHeader";
 import type { ComposerDefaults } from "./replyDefaults";
@@ -14,6 +14,32 @@ const PLACEHOLDERS = [
 
 const INPUT_CLASS =
   "w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 outline-none transition-colors focus:border-indigo-400 focus:ring-4 focus:ring-indigo-100 disabled:opacity-60";
+
+const KNOWN_PLACEHOLDERS = new Set(["first_name", "last_name", "full_name", "company"]);
+const SPAM_WORDS =
+  /\b((?<!feel )free|guarantee(d)?|risk[- ]free|act now|urgent|limited time|click here|winner|no obligation|earn money|double your|100% (free|guaranteed)|cash bonus|lowest price|buy now|order now)\b|\${2,}/i;
+
+/** Things in an email that make spam filters (or the reader) suspicious. Advice only; never blocks sending. */
+function spamHints(subject: string, body: string): string[] {
+  const hints: string[] = [];
+  const letters = subject.replace(/[^a-z]/gi, "");
+  if (letters.length >= 6 && letters.replace(/[^A-Z]/g, "").length / letters.length > 0.7) {
+    hints.push("The subject is mostly capital letters.");
+  }
+  if ((subject.match(/!/g) ?? []).length >= 2 || /!!/.test(body)) hints.push("Several exclamation marks look like marketing.");
+  const spammy = `${subject}\n${body}`.match(SPAM_WORDS);
+  if (spammy) hints.push(`Words like "${spammy[0]}" are common in spam.`);
+  const links = body.match(/https?:\/\/\S+/g) ?? [];
+  if (links.length > 2) hints.push(`${links.length} links: keep a first email to one or two.`);
+  if (links.some((link) => /bit\.ly|tinyurl|t\.co\/|goo\.gl|ow\.ly/i.test(link))) hints.push("Short links (bit.ly etc.) are often blocked; use the full address.");
+  const words = body.split(/\s+/).filter(Boolean).length;
+  if (words > 300) hints.push(`${words} words: short emails (under 150 words) get more replies.`);
+  const unknown = (`${subject} ${body}`.match(/\{\{\s*([^{}]*?)\s*\}\}/g) ?? []).filter(
+    (token) => !KNOWN_PLACEHOLDERS.has(token.replace(/[{}\s]/g, ""))
+  );
+  if (unknown.length > 0) hints.push(`${unknown[0]} can't be filled in. Use one of the Insert buttons below.`);
+  return hints;
+}
 
 function parseAddresses(value: string): string[] {
   return value
@@ -41,6 +67,9 @@ export function EmailComposer({ investorId, defaults, setup, onSent, onCancel, t
   const [body, setBody] = useState(defaults.body ?? "");
   const [isSending, setIsSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // An address that bounced before: the person can still choose to send.
+  const [bouncedWarning, setBouncedWarning] = useState<string | null>(null);
+  const hints = useMemo(() => spamHints(subject, body), [subject, body]);
   const bodyRef = useRef<HTMLTextAreaElement>(null);
 
   const notConfigured = setup !== null && !setup.smtpConfigured;
@@ -82,10 +111,11 @@ export function EmailComposer({ investorId, defaults, setup, onSent, onCancel, t
     }
   }
 
-  async function handleSend(event?: React.FormEvent) {
+  async function handleSend(event?: React.FormEvent, options: { allowBounced?: boolean } = {}) {
     event?.preventDefault();
     if (isSending) return;
     setError(null);
+    setBouncedWarning(null);
     setIsSending(true);
     try {
       const response = await fetch("/api/emails", {
@@ -98,10 +128,15 @@ export function EmailComposer({ investorId, defaults, setup, onSent, onCancel, t
           subject,
           body,
           replyToEmailId: defaults.replyToEmailId ?? null,
+          allowBounced: options.allowBounced === true,
         }),
       });
       const result = await response.json().catch(() => null);
       if (!response.ok) {
+        if (result?.code === "bounced_before") {
+          setBouncedWarning(result.error);
+          return;
+        }
         setError(result?.error ?? `Sending failed (status ${response.status})`);
         // A refused send is still recorded on the timeline as a failed email.
         if (response.status === 502) onSent({ ok: false });
@@ -211,6 +246,36 @@ export function EmailComposer({ investorId, defaults, setup, onSent, onCancel, t
           </button>
         ))}
       </div>
+
+      {hints.length > 0 && (
+        <div className="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800 ring-1 ring-amber-200">
+          <div className="font-medium">Tips to stay out of spam</div>
+          <ul className="mt-1 list-disc space-y-0.5 pl-4">
+            {hints.map((hint) => (
+              <li key={hint}>{hint}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {bouncedWarning && (
+        <div className="rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-700 ring-1 ring-rose-200">
+          <div>{bouncedWarning}</div>
+          <div className="mt-2 flex gap-2">
+            <button
+              type="button"
+              onClick={() => handleSend(undefined, { allowBounced: true })}
+              disabled={isSending}
+              className="rounded-md bg-rose-600 px-3 py-1 text-xs font-medium text-white hover:bg-rose-500 disabled:opacity-50"
+            >
+              Send anyway
+            </button>
+            <button type="button" onClick={() => setBouncedWarning(null)} className="rounded-md px-3 py-1 text-xs font-medium text-rose-700 hover:bg-rose-100">
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
 
       {error && <div className="rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-700">{error}</div>}
 

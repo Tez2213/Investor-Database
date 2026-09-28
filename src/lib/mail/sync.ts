@@ -60,21 +60,29 @@ function htmlToText(html: string): string {
  * Investors a bounce is about: addresses it reports as failed that belong to an
  * investor this company has actually emailed.
  */
-async function bouncedInvestorIds(db: PoolClient, companyId: string, parsed: ParsedMail, ownAddresses: string[]): Promise<string[]> {
+async function bouncedInvestors(
+  db: PoolClient,
+  companyId: string,
+  parsed: ParsedMail,
+  ownAddresses: string[]
+): Promise<{ ids: string[]; addresses: string[] }> {
   const { addresses } = bouncedAddresses(parsed, ownAddresses);
-  if (addresses.length === 0) return [];
-  const result = await db.query<{ id: string }>(
-    `SELECT DISTINCT i.id FROM investors i
+  if (addresses.length === 0) return { ids: [], addresses: [] };
+  const result = await db.query<{ id: string; address: string }>(
+    `SELECT DISTINCT i.id, lower(i.email) AS address FROM investors i
      WHERE lower(i.email) = ANY($2::text[])
        AND EXISTS (SELECT 1 FROM emails e
                    WHERE e.company_id = $1 AND e.direction = 'outbound'
-                     AND lower(i.email) = ANY(e.to_addresses || e.cc_addresses))`,
+                     AND (e.to_addresses @> ARRAY[lower(i.email)] OR e.cc_addresses @> ARRAY[lower(i.email)]))`,
     [companyId, addresses]
   );
-  return result.rows.map((row) => row.id);
+  return {
+    ids: Array.from(new Set(result.rows.map((row) => row.id))),
+    addresses: Array.from(new Set(result.rows.map((row) => row.address))),
+  };
 }
 
-async function importMessage(db: PoolClient, source: Buffer, meta: ImportMeta): Promise<boolean> {
+export async function importMessage(db: PoolClient, source: Buffer, meta: ImportMeta): Promise<boolean> {
   const parsed = await simpleParser(source, { skipImageLinks: true, skipTextToHtml: true });
 
   const from = addressList(parsed.from)[0] ?? { address: "unknown@unknown", name: "" };
@@ -99,7 +107,8 @@ async function importMessage(db: PoolClient, source: Buffer, meta: ImportMeta): 
   );
   // A "delivery failed" notice belongs to the investors it bounced for, not the mail server that sent it.
   const bounceNotice = meta.direction === "inbound" && isBounce(parsed, from.address);
-  const bounced = bounceNotice ? await bouncedInvestorIds(db, meta.companyId, parsed, [...to, ...cc]) : [];
+  const bounce = bounceNotice ? await bouncedInvestors(db, meta.companyId, parsed, [...to, ...cc]) : { ids: [], addresses: [] };
+  const bounced = bounce.ids;
   const counterparts = meta.direction === "inbound" ? [from.address] : [...to, ...cc];
   const investorIds = bounced.length > 0 ? [...bounced] : await findInvestorIdsByAddresses(db, counterparts);
   if (thread?.investorId && !investorIds.includes(thread.investorId)) {
@@ -133,16 +142,25 @@ async function importMessage(db: PoolClient, source: Buffer, meta: ImportMeta): 
 
   // Rate investors from what happened: bounced → Low, a real reply → High, mail sent from the mailbox → Medium.
   if (bounced.length > 0) {
-    // The email that bounced: the latest one sent to each of these investors.
+    // The email that bounced: the latest one sent to each bounced address.
     await db.query(
-      `UPDATE emails o SET bounced_at = $3
-       WHERE o.id IN (
-         SELECT DISTINCT ON (x.investor_id) x.id FROM emails x
-         WHERE x.company_id = $1 AND x.investor_id = ANY($2::bigint[])
-           AND x.direction = 'outbound' AND x.status = 'sent' AND x.occurred_at <= $3
-         ORDER BY x.investor_id, x.occurred_at DESC)
-       AND o.bounced_at IS NULL`,
-      [meta.companyId, bounced, occurredAt]
+      `UPDATE emails o
+       SET bounced_at = coalesce(o.bounced_at, $3),
+           bounced_addresses = ARRAY(SELECT DISTINCT a FROM unnest(o.bounced_addresses || target.addresses) AS a)
+       FROM (
+         SELECT id, array_agg(address) AS addresses
+         FROM (
+           SELECT DISTINCT ON (address) x.id, address
+           FROM unnest($2::text[]) AS address
+           JOIN emails x ON x.company_id = $1 AND x.direction = 'outbound' AND x.status = 'sent'
+                        AND x.occurred_at <= $3
+                        AND (x.to_addresses @> ARRAY[address] OR x.cc_addresses @> ARRAY[address])
+           ORDER BY address, x.occurred_at DESC
+         ) latest
+         GROUP BY id
+       ) target
+       WHERE o.id = target.id`,
+      [meta.companyId, bounce.addresses, occurredAt]
     );
     await autoRateInvestors(db, {
       companyId: meta.companyId,
