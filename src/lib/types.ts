@@ -24,6 +24,13 @@ export type Investor = {
   team_score: number | null;
   team_votes: number;
   team_ratings: TeamRating[];
+  /** Emails your company sent this investor (other companies' mail is never included). */
+  mails_sent: number;
+  last_mailed_at: string | null;
+  /** Who on your team sent the latest one. */
+  last_mailed_by: string | null;
+  /** The investor has written to your company. */
+  has_replied: boolean;
 };
 
 export type FieldSource = "predicted" | "edited";
@@ -50,6 +57,12 @@ export const TEAM_SCORE_OPTIONS = [
   { value: "medium", label: "Medium (1.5–2.5)" },
   { value: "low", label: "Low (below 1.5)" },
   { value: "unrated", label: "Not rated yet" },
+] as const;
+
+export const CONTACTED_OPTIONS = [
+  { value: "yes", label: "Emailed by us" },
+  { value: "no", label: "Not emailed yet" },
+  { value: "replied", label: "Replied to us" },
 ] as const;
 
 export const EDITABLE_FIELDS: { key: EditableInvestorField; label: string }[] = [
@@ -85,6 +98,8 @@ export type InvestorFilters = {
   teamScore: string;
   /** "" (all) | "original" | "uploaded" | a company id */
   source: string;
+  /** "" (all) | "yes" | "no" | "replied": emailed by your company */
+  contacted: string;
   hasEmail: HasFilterValue;
   hasLinkedIn: HasFilterValue;
 };
@@ -98,6 +113,7 @@ export const EMPTY_FILTERS: InvestorFilters = {
   quality: "",
   teamScore: "",
   source: "",
+  contacted: "",
   hasEmail: "all",
   hasLinkedIn: "all",
 };

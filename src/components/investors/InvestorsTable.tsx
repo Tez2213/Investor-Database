@@ -2,7 +2,7 @@
 
 import type { Investor } from "../../lib/types";
 import { fullName, initials, sourceHighlight } from "../../lib/format";
-import { SourceWatermark, TeamScoreBadge } from "./Badges";
+import { OutreachBadge, SourceWatermark, TeamScoreBadge } from "./Badges";
 import { InvestorIdBadge } from "./InvestorIdBadge";
 import { QualitySelect } from "./QualitySelect";
 
@@ -198,6 +198,7 @@ export function InvestorsTable({
                             {name || "—"}
                           </span>
                           <SourceWatermark companyId={investor.source_company_id} compact />
+                          <OutreachBadge investor={investor} />
                         </div>
                         <div className="truncate text-xs text-slate-500">
                           <span className={sourceHighlight(sources.title)}>

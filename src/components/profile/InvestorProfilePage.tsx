@@ -30,7 +30,7 @@ import { EmailComposer } from "../email/EmailComposer";
 import { EmailSetupNotice } from "../email/EmailSetupNotice";
 import { EmailViewer } from "../email/EmailViewer";
 import { buildReplyDefaults, type ComposerDefaults } from "../email/replyDefaults";
-import { SourceWatermark, TeamScoreBadge } from "../investors/Badges";
+import { OutreachBadge, SourceWatermark, TeamScoreBadge } from "../investors/Badges";
 import { InvestorEditForm } from "../investors/InvestorEditForm";
 import { InvestorIdBadge } from "../investors/InvestorIdBadge";
 import { QualitySelect } from "../investors/QualitySelect";
@@ -340,6 +340,7 @@ export function InvestorProfilePage({ id, initialCompose }: { id: string; initia
                   <InvestorIdBadge id={investor.id} />
                   <QualitySelect investor={investor} onChange={handleQualityChange} />
                   <SourceWatermark companyId={investor.source_company_id} />
+                  <OutreachBadge investor={investor} />
                 </div>
                 <div className="mt-1 text-sm text-slate-500">
                   {[investor.title, investor.company_name].filter(Boolean).join(" · ") || "No title or company yet"}

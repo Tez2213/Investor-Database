@@ -3,7 +3,7 @@ import { pool } from "../../../lib/db";
 import { requireSession } from "../../../lib/auth/session";
 import { isCompanyId } from "../../../lib/companies";
 import { parseInvestorCode } from "../../../lib/format";
-import { investorSelect, teamScoreCondition } from "../../../lib/investorQuery";
+import { investorSelect, outreachCondition, teamScoreCondition } from "../../../lib/investorQuery";
 
 const DEFAULT_LIMIT = 50;
 const MAX_LIMIT = 100;
@@ -27,6 +27,7 @@ export async function GET(request: NextRequest) {
     const quality = searchParams.get("quality")?.trim() || "";
     const teamScore = searchParams.get("teamScore")?.trim() || "";
     const source = searchParams.get("source")?.trim() || "";
+    const contacted = searchParams.get("contacted")?.trim() || "";
     const hasEmail = parseHasFilter(searchParams.get("hasEmail"));
     const hasLinkedIn = parseHasFilter(searchParams.get("hasLinkedIn"));
 
@@ -73,6 +74,9 @@ export async function GET(request: NextRequest) {
     if (source === "original") conditions.push("i.source_company_id IS NULL");
     else if (source === "uploaded") conditions.push("i.source_company_id IS NOT NULL");
     else if (isCompanyId(source)) conditions.push(`i.source_company_id = ${param(source)}`);
+
+    const contactedCondition = outreachCondition(contacted, "$1");
+    if (contactedCondition) conditions.push(contactedCondition);
 
     if (hasEmail === "yes") conditions.push(`(i.email IS NOT NULL AND i.email <> '')`);
     else if (hasEmail === "no") conditions.push(`(i.email IS NULL OR i.email = '')`);

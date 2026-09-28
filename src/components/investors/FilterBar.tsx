@@ -2,6 +2,7 @@
 
 import { COMPANIES } from "../../lib/companies";
 import {
+  CONTACTED_OPTIONS,
   TEAM_SCORE_OPTIONS,
   type FilterOptions,
   type HasFilterValue,
@@ -146,6 +147,24 @@ export function FilterBar({
           {COMPANIES.map((company) => (
             <option key={company.id} value={company.id}>
               Source: added by {company.name}
+            </option>
+          ))}
+        </select>
+
+        <select
+          value={filters.contacted}
+          onChange={(event) => onFilterChange("contacted", event.target.value)}
+          title="Based on your company's own emails only"
+          className={`rounded-lg border px-3 py-2 text-sm outline-none focus:ring-4 focus:ring-indigo-100 ${
+            filters.contacted
+              ? "border-indigo-200 bg-indigo-50/60 text-indigo-900"
+              : "border-slate-200 bg-white text-slate-500"
+          }`}
+        >
+          <option value="">Outreach: all</option>
+          {CONTACTED_OPTIONS.map((option) => (
+            <option key={option.value} value={option.value}>
+              Outreach: {option.label.toLowerCase()}
             </option>
           ))}
         </select>

@@ -30,11 +30,12 @@ const DEFAULT_NON_SEARCH_FILTERS: NonSearchFilters = {
   quality: "",
   teamScore: "",
   source: "",
+  contacted: "",
   hasEmail: "all",
   hasLinkedIn: "all",
 };
 
-const TEXT_FILTER_KEYS = ["country", "city", "industry", "title", "quality", "teamScore", "source"] as const;
+const TEXT_FILTER_KEYS = ["country", "city", "industry", "title", "quality", "teamScore", "source", "contacted"] as const;
 
 function parseHasParam(value: string | null): HasFilterValue {
   return value === "yes" || value === "no" ? value : "all";
