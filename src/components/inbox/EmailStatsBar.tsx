@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import type { EmailStats } from "../../lib/types";
 import { useOptionalSession } from "../SessionProvider";
+import { StatsDetails, type StatsMetric } from "./StatsDetails";
 
 const PERIODS = [
   { days: 7, label: "7 days" },
@@ -23,15 +24,27 @@ function StatCard({
   detail,
   accent,
   rate,
+  active,
+  onClick,
 }: {
   label: string;
   value: number | null;
   detail: string;
   accent: string;
   rate?: string;
+  active: boolean;
+  onClick: () => void;
 }) {
   return (
-    <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={active}
+      title="Show the investors"
+      className={`rounded-2xl border bg-white p-4 text-left shadow-sm transition hover:-translate-y-0.5 hover:shadow-md ${
+        active ? "border-indigo-300 ring-2 ring-indigo-100" : "border-slate-200 hover:border-slate-300"
+      }`}
+    >
       <div className="flex items-center gap-2 text-xs font-medium text-slate-500">
         <span className={`h-2 w-2 rounded-full ${accent}`} />
         {label}
@@ -45,7 +58,7 @@ function StatCard({
         </div>
       )}
       <div className="mt-1 truncate text-xs text-slate-400">{detail}</div>
-    </div>
+    </button>
   );
 }
 
@@ -88,6 +101,8 @@ export function EmailStatsBar() {
   const [scope, setScope] = useState<"mine" | "team">(user?.role === "admin" ? "team" : "mine");
   const [days, setDays] = useState<number>(30);
   const [stats, setStats] = useState<EmailStats | null>(null);
+  const [open, setOpen] = useState<StatsMetric | null>(null);
+  const card = (metric: StatsMetric) => ({ active: open === metric, onClick: () => setOpen(open === metric ? null : metric) });
 
   useEffect(() => {
     let cancelled = false;
@@ -126,12 +141,14 @@ export function EmailStatsBar() {
       <div className={`grid grid-cols-2 gap-3 transition-opacity sm:grid-cols-3 lg:grid-cols-5 ${current || loading ? "opacity-100" : "opacity-60"}`}>
         <StatCard
           label="Emails sent"
+          {...card("sent")}
           accent="bg-indigo-500"
           value={loading ? null : shown.sent}
           detail={loading ? " " : `${shown.delivered.toLocaleString()} delivered · ${shown.investorsContacted.toLocaleString()} investors`}
         />
         <StatCard
           label="Not delivered"
+          {...card("failed")}
           accent="bg-rose-500"
           value={loading ? null : shown.failed}
           rate={loading || shown.failed === 0 ? undefined : percent(shown.failed, attempted)}
@@ -139,6 +156,7 @@ export function EmailStatsBar() {
         />
         <StatCard
           label="Opened by investor"
+          {...card("opened")}
           accent="bg-teal-500"
           value={loading ? null : shown.opened}
           rate={loading ? undefined : percent(shown.opened, shown.tracked)}
@@ -146,6 +164,7 @@ export function EmailStatsBar() {
         />
         <StatCard
           label="Investors replied"
+          {...card("replied")}
           accent="bg-emerald-500"
           value={loading ? null : shown.investorsReplied}
           rate={loading ? undefined : percent(shown.investorsReplied, shown.investorsContacted)}
@@ -153,11 +172,14 @@ export function EmailStatsBar() {
         />
         <StatCard
           label="Emails received"
+          {...card("received")}
           accent="bg-amber-500"
           value={loading ? null : shown.received}
           detail={scope === "mine" ? "Replies to your emails" : "In the team inbox"}
         />
       </div>
+
+      {open && <StatsDetails metric={open} days={days} scope={scope} onClose={() => setOpen(null)} />}
     </section>
   );
 }

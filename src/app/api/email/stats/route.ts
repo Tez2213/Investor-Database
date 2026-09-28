@@ -1,10 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { pool } from "../../../../lib/db";
 import { requireSession } from "../../../../lib/auth/session";
-import { investorAccessCondition } from "../../../../lib/access";
+import { REAL_REPLY, statsCtes, statsParams } from "../../../../lib/emailStatsQuery";
 import type { EmailStats } from "../../../../lib/types";
-
-const ALLOWED_DAYS = new Set([0, 7, 30, 90]);
 
 /**
  * Outreach numbers over the last N days (0 = all time). scope=mine counts the
@@ -15,40 +13,12 @@ export async function GET(request: NextRequest) {
   const session = await requireSession(request);
   if (session instanceof NextResponse) return session;
 
-  const params = request.nextUrl.searchParams;
-  const requested = Number(params.get("days") ?? 30);
-  const days = ALLOWED_DAYS.has(requested) ? requested : 30;
-  const scope = params.get("scope") === "team" ? "team" : "mine";
-
-  const values: unknown[] = [session.companyId, days, scope, session.userId];
-  // Members limited to assigned investors see numbers for their investors only.
-  const access = investorAccessCondition(session, "investor_id", (value) => {
-    values.push(value);
-    return `$${values.length}`;
-  });
-  const accessSql = access ? `AND ${access}` : "";
-  const inPeriod = "($2::int = 0 OR occurred_at > now() - make_interval(days => $2::int))";
+  const { days, scope } = statsParams(request.nextUrl.searchParams);
+  const { values, ctes } = statsCtes(session, days, scope);
 
   try {
     const result = await pool.query<Record<"sent" | "delivered" | "failed" | "tracked" | "opened" | "received" | "contacted" | "replied", string>>(
-      `WITH outgoing AS (
-         SELECT * FROM emails
-         WHERE company_id = $1 AND direction = 'outbound'
-           AND ($3::text = 'team' OR sent_by_user_id = $4::bigint) ${accessSql}
-       ),
-       out_period AS (SELECT * FROM outgoing WHERE ${inPeriod}),
-       in_period AS (
-         SELECT * FROM emails
-         WHERE company_id = $1 AND direction = 'inbound' AND ${inPeriod} ${accessSql}
-           AND ($3::text = 'team' OR thread_id IN (SELECT thread_id FROM outgoing))
-       ),
-       -- Investors who got at least one email (sent and not bounced) in the period.
-       first_contact AS (
-         SELECT investor_id, min(occurred_at) AS first_at
-         FROM out_period
-         WHERE status = 'sent' AND bounced_at IS NULL AND investor_id IS NOT NULL
-         GROUP BY investor_id
-       )
+      `${ctes}
        SELECT
          (SELECT count(*) FROM out_period WHERE status = 'sent') AS sent,
          (SELECT count(*) FROM out_period WHERE status = 'sent' AND bounced_at IS NULL) AS delivered,
@@ -59,11 +29,8 @@ export async function GET(request: NextRequest) {
          (SELECT count(*) FROM first_contact) AS contacted,
          -- Reached investors who wrote back themselves (not a bounce or out-of-office) after our first email.
          (SELECT count(*) FROM first_contact f
-          WHERE EXISTS (
-            SELECT 1 FROM emails r
-            WHERE r.company_id = $1 AND r.direction = 'inbound' AND r.inbound_kind IS NULL
-              AND r.investor_id = f.investor_id AND r.occurred_at > f.first_at
-          )) AS replied`,
+          WHERE EXISTS (SELECT 1 FROM emails r WHERE ${REAL_REPLY} AND r.investor_id = f.investor_id AND r.occurred_at > f.first_at)
+         ) AS replied`,
       values
     );
     const row = result.rows[0];

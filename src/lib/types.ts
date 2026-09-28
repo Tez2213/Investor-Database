@@ -262,6 +262,22 @@ export type EmailStats = {
   investorsReplied: number;
 };
 
+/** One investor (or unknown address) behind an inbox number. */
+export type StatsDetailRow = {
+  investor_id: string | null;
+  name: string | null;
+  company_name: string | null;
+  /** This company's current rating of the investor. */
+  quality: string | null;
+  address: string | null;
+  /** Emails (or replies) counted for this investor. */
+  count: number;
+  last_at: string | null;
+  /** Total opens, for "Opened by investor". */
+  opens: number;
+  note: string | null;
+};
+
 export type EmailSetupStatus = {
   smtpConfigured: boolean;
   imapConfigured: boolean;
