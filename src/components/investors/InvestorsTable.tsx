@@ -1,7 +1,9 @@
 "use client";
 
 import type { Investor } from "../../lib/types";
-import { fullName, initials, qualityBadgeClass, sourceHighlight } from "../../lib/format";
+import { fullName, initials, sourceHighlight } from "../../lib/format";
+import { InvestorIdBadge } from "./InvestorIdBadge";
+import { QualitySelect } from "./QualitySelect";
 
 type InvestorsTableProps = {
   investors: Investor[];
@@ -15,9 +17,10 @@ type InvestorsTableProps = {
   checkedIds: ReadonlySet<Investor["id"]>;
   onToggleChecked: (investor: Investor) => void;
   onToggleAllChecked: () => void;
+  onQualityChange: (investor: Investor, quality: string | null) => Promise<void>;
 };
 
-const COLUMN_COUNT = 7;
+const COLUMN_COUNT = 8;
 
 const CHECKBOX_CLASS =
   "h-4 w-4 cursor-pointer rounded border-slate-300 accent-indigo-600";
@@ -50,6 +53,7 @@ export function InvestorsTable({
   checkedIds,
   onToggleChecked,
   onToggleAllChecked,
+  onQualityChange,
 }: InvestorsTableProps) {
   const checkedLoadedCount = investors.filter((investor) =>
     checkedIds.has(investor.id)
@@ -109,7 +113,7 @@ export function InvestorsTable({
 
   return (
     <div className="overflow-x-auto">
-      <table className="w-full min-w-[960px] text-left text-sm">
+      <table className="w-full min-w-[1080px] text-left text-sm">
         <thead className="sticky top-0 z-10 border-b border-slate-200 bg-slate-50/95 text-xs font-semibold uppercase tracking-wide text-slate-500 backdrop-blur">
           <tr>
             <th className="w-12 py-3 pl-5 pr-0">
@@ -125,6 +129,7 @@ export function InvestorsTable({
                 disabled={isInitialLoading || investors.length === 0}
               />
             </th>
+            <th className="px-5 py-3">ID</th>
             <th className="px-5 py-3">Investor</th>
             <th className="px-5 py-3">Company</th>
             <th className="px-5 py-3">Industry</th>
@@ -167,6 +172,10 @@ export function InvestorsTable({
                       checked={isChecked}
                       onChange={() => onToggleChecked(investor)}
                     />
+                  </td>
+
+                  <td className="whitespace-nowrap px-5 py-3.5">
+                    <InvestorIdBadge id={investor.id} />
                   </td>
 
                   <td className="px-5 py-3.5">
@@ -236,18 +245,11 @@ export function InvestorsTable({
                     </div>
                   </td>
 
-                  <td className="px-5 py-3.5">
-                    {investor.quality ? (
-                      <span
-                        className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ring-1 ring-inset ${qualityBadgeClass(
-                          investor.quality
-                        )} ${sources.quality === "edited" ? "outline-2 outline-offset-1 outline-sky-300" : ""}`}
-                      >
-                        {investor.quality}
-                      </span>
-                    ) : (
-                      <span className="text-slate-300">—</span>
-                    )}
+                  <td
+                    className="px-5 py-3.5"
+                    onClick={(event) => event.stopPropagation()}
+                  >
+                    <QualitySelect investor={investor} onChange={onQualityChange} />
                   </td>
                 </tr>
               );

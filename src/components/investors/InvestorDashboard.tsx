@@ -10,7 +10,7 @@ import type {
   InvestorFilters,
   InvestorsResponse,
 } from "../../lib/types";
-import { SOURCE_STYLES, formatCount } from "../../lib/format";
+import { SOURCE_STYLES, formatCount, investorCode } from "../../lib/format";
 import { downloadCsv, investorsToCsv } from "../../lib/csv";
 import { BulkActionsMenu } from "./BulkActionsMenu";
 import { useDebouncedValue } from "../../lib/useDebouncedValue";
@@ -199,21 +199,34 @@ export function InvestorDashboard() {
       .catch(() => undefined);
   }, [loadFilterOptions]);
 
-  const handleInvestorSaved = useCallback(
-    (updated: Investor) => {
-      setInvestors((previous) =>
-        previous.map((investor) => (investor.id === updated.id ? updated : investor))
+  // Swap freshly saved rows into the list, the selection and the open drawer.
+  const applyUpdatedInvestors = useCallback(
+    (rows: Investor[]) => {
+      const updated = new Map<Investor["id"], Investor>(
+        rows.map((investor) => [investor.id, investor])
       );
-      setSelectedInvestor(updated);
+      setInvestors((previous) =>
+        previous.map((investor) => updated.get(investor.id) ?? investor)
+      );
       setChecked((previous) => {
-        if (!previous.has(updated.id)) return previous;
+        if (!rows.some((investor) => previous.has(investor.id))) return previous;
         const next = new Map(previous);
-        next.set(updated.id, updated);
+        for (const [id, investor] of updated) {
+          if (next.has(id)) next.set(id, investor);
+        }
         return next;
       });
+      setSelectedInvestor((current) =>
+        current ? updated.get(current.id) ?? current : current
+      );
       loadFilterOptions();
     },
     [loadFilterOptions]
+  );
+
+  const handleInvestorSaved = useCallback(
+    (updated: Investor) => applyUpdatedInvestors([updated]),
+    [applyUpdatedInvestors]
   );
 
   const handleToggleChecked = useCallback((investor: Investor) => {
@@ -290,25 +303,12 @@ export function InvestorDashboard() {
           throw new Error(result?.error ?? `Update failed (status ${response.status})`);
         }
 
-        const updated = new Map<Investor["id"], Investor>(
-          (result.data as Investor[]).map((investor) => [investor.id, investor])
-        );
-        setInvestors((previous) =>
-          previous.map((investor) => updated.get(investor.id) ?? investor)
-        );
-        setChecked((previous) => {
-          const next = new Map(previous);
-          for (const [id, investor] of updated) next.set(id, investor);
-          return next;
-        });
-        setSelectedInvestor((current) =>
-          current ? updated.get(current.id) ?? current : current
-        );
-        loadFilterOptions();
+        const rows = result.data as Investor[];
+        applyUpdatedInvestors(rows);
         showNotice(
           quality
-            ? `Set quality to "${quality}" for ${updated.size.toLocaleString()} investors.`
-            : `Cleared quality for ${updated.size.toLocaleString()} investors.`
+            ? `Set quality to "${quality}" for ${rows.length.toLocaleString()} investors.`
+            : `Cleared quality for ${rows.length.toLocaleString()} investors.`
         );
       } catch (err) {
         showNotice(err instanceof Error ? err.message : "Update failed", "error");
@@ -316,7 +316,32 @@ export function InvestorDashboard() {
         setIsBulkSaving(false);
       }
     },
-    [checked, loadFilterOptions, showNotice]
+    [checked, applyUpdatedInvestors, showNotice]
+  );
+
+  const handleRowQuality = useCallback(
+    async (investor: Investor, quality: string | null) => {
+      try {
+        const response = await fetch(`/api/investors/${investor.id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ quality }),
+        });
+        const result = await response.json().catch(() => null);
+        if (!response.ok) {
+          throw new Error(result?.error ?? `Update failed (status ${response.status})`);
+        }
+        applyUpdatedInvestors([result.data as Investor]);
+        showNotice(
+          quality
+            ? `${investorCode(investor.id)}: quality set to "${quality}".`
+            : `${investorCode(investor.id)}: quality cleared.`
+        );
+      } catch (err) {
+        showNotice(err instanceof Error ? err.message : "Update failed", "error");
+      }
+    },
+    [applyUpdatedInvestors, showNotice]
   );
 
   const checkedIds = useMemo(() => new Set(checked.keys()), [checked]);
@@ -486,6 +511,7 @@ export function InvestorDashboard() {
             checkedIds={checkedIds}
             onToggleChecked={handleToggleChecked}
             onToggleAllChecked={handleToggleAllChecked}
+            onQualityChange={handleRowQuality}
           />
         </div>
       </div>

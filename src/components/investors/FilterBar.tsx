@@ -56,7 +56,7 @@ export function FilterBar({
           type="text"
           value={searchInput}
           onChange={(event) => onSearchChange(event.target.value)}
-          placeholder="Search investors, companies, titles, industries, cities..."
+          placeholder="Search by name, company, email, city or ID (e.g. INV-000123)..."
           className="w-full rounded-xl border border-slate-200 bg-white py-3 pl-10 pr-4 text-sm outline-none transition-shadow focus:border-indigo-400 focus:ring-4 focus:ring-indigo-100"
         />
       </div>

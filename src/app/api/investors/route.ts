@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { pool } from "../../../lib/db";
+import { parseInvestorCode } from "../../../lib/format";
 
 const DEFAULT_LIMIT = 50;
 const MAX_LIMIT = 100;
@@ -33,10 +34,19 @@ export async function GET(request: NextRequest) {
     const values: Array<string | number> = [];
 
     if (search) {
+      // Searching an investor ID ("INV-000123", "#123" or "123") also matches that row.
+      const searchId = parseInvestorCode(search);
+      let idCondition = "";
+      if (searchId !== null) {
+        values.push(searchId);
+        idCondition = `id = $${values.length} OR`;
+      }
+
       values.push(`%${search}%`);
 
       conditions.push(`
         (
+          ${idCondition}
           first_name ILIKE $${values.length}
           OR last_name ILIKE $${values.length}
           OR company_name ILIKE $${values.length}

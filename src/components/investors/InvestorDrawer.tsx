@@ -17,6 +17,7 @@ import {
   sourceHighlight,
   toHref,
 } from "../../lib/format";
+import { InvestorIdBadge } from "./InvestorIdBadge";
 
 type InvestorDrawerProps = {
   investor: Investor | null;
@@ -255,8 +256,11 @@ function DrawerContent({ investor, filterOptions, onClose, onSaved }: DrawerCont
             <div className="truncate text-base font-semibold text-slate-900">
               <span className={sourceHighlight(nameSource)}>{name || "—"}</span>
             </div>
-            <div className="truncate text-sm text-slate-500">
-              {isEditing ? "Editing investor" : investor.title || "—"}
+            <div className="flex min-w-0 items-center gap-2 text-sm text-slate-500">
+              <InvestorIdBadge id={investor.id} />
+              <span className="truncate">
+                {isEditing ? "Editing investor" : investor.title || "—"}
+              </span>
             </div>
           </div>
         </div>

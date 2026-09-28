@@ -53,6 +53,19 @@ export function qualityBadgeClass(quality: string): string {
   return QUALITY_STYLES[quality.toLowerCase()] ?? CUSTOM_QUALITY_STYLE;
 }
 
+/** Short, permanent reference for an investor, e.g. id 123 → "INV-000123". */
+export function investorCode(id: number | string): string {
+  return `INV-${String(id).padStart(6, "0")}`;
+}
+
+/** Reads "INV-000123", "inv123", "#123" or "123" back into an id; null otherwise. */
+export function parseInvestorCode(text: string): number | null {
+  const match = /^(?:inv[-\s]?|#)?0*(\d{1,15})$/i.exec(text.trim());
+  if (!match) return null;
+  const id = Number(match[1]);
+  return Number.isSafeInteger(id) && id > 0 ? id : null;
+}
+
 export function formatCount(value: number | null): string {
   if (value === null) return "—";
   return value.toLocaleString("en-US");

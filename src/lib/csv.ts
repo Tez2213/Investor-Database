@@ -1,6 +1,8 @@
 import type { Investor } from "./types";
+import { investorCode } from "./format";
 
 const CSV_COLUMNS: { key: keyof Investor; header: string }[] = [
+  { key: "id", header: "Investor ID" },
   { key: "first_name", header: "First Name" },
   { key: "last_name", header: "Last Name" },
   { key: "title", header: "Title" },
@@ -25,7 +27,9 @@ function escapeCell(value: unknown): string {
 export function investorsToCsv(investors: Investor[]): string {
   const header = CSV_COLUMNS.map((column) => column.header).join(",");
   const rows = investors.map((investor) =>
-    CSV_COLUMNS.map((column) => escapeCell(investor[column.key])).join(",")
+    CSV_COLUMNS.map((column) =>
+      escapeCell(column.key === "id" ? investorCode(investor.id) : investor[column.key])
+    ).join(",")
   );
   return [header, ...rows].join("\r\n");
 }
