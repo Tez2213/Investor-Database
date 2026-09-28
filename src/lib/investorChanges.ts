@@ -1,13 +1,15 @@
-import { EDITABLE_FIELDS, type EditableInvestorField } from "./types";
+import type { PoolClient } from "pg";
+import { logActivities, withTransaction, type NewActivity } from "./activity";
+import { loadInvestors } from "./investorQuery";
+import {
+  EDITABLE_FIELDS,
+  type EditableInvestorField,
+  type FieldChange,
+  type Investor,
+} from "./types";
 
 const MAX_FIELD_LENGTH = 1000;
 const EDITABLE_KEYS = new Set<string>(EDITABLE_FIELDS.map((field) => field.key));
-
-export const INVESTOR_COLUMNS = [
-  "id",
-  ...EDITABLE_FIELDS.map((field) => field.key),
-  "field_sources",
-].join(", ");
 
 export type InvestorChange = [EditableInvestorField, string | null];
 
@@ -36,7 +38,7 @@ export function parseInvestorChanges(
       return { error: "Email address is not valid" };
     }
 
-    changes.push([key as EditableInvestorField, trimmed || null]);
+    changes.push([key as EditableInvestorField, key === "email" ? trimmed.toLowerCase() || null : trimmed || null]);
   }
 
   if (changes.length === 0) {
@@ -61,4 +63,52 @@ export function buildUpdateSet(changes: InvestorChange[]) {
     setClause: assignments.join(", "),
     values: [...changes.map(([, value]) => value), JSON.stringify(editedMarks)],
   };
+}
+
+/**
+ * Applies shared-field changes to the given investors in one transaction and
+ * records a "field_change" entry on the acting company's timeline for every
+ * investor whose values actually changed. Returns rows as that company sees them.
+ */
+export async function applyInvestorChanges(
+  pool: { connect(): Promise<PoolClient> },
+  ids: number[],
+  changes: InvestorChange[],
+  context: { actor: string; companyId: string }
+): Promise<{ rows: Investor[]; changedCount: number }> {
+  const keys = changes.map(([key]) => key);
+
+  return withTransaction(pool, async (client) => {
+    const before = await client.query<Record<string, string | null> & { id: string }>(
+      `SELECT id, ${keys.join(", ")} FROM investors WHERE id = ANY($1::bigint[]) FOR UPDATE`,
+      [ids]
+    );
+    if (before.rowCount === 0) return { rows: [], changedCount: 0 };
+
+    const { setClause, values } = buildUpdateSet(changes);
+    await client.query(
+      `UPDATE investors SET ${setClause} WHERE id = ANY($${values.length + 1}::bigint[])`,
+      [...values, ids]
+    );
+
+    const activities: NewActivity[] = [];
+    for (const row of before.rows) {
+      const diffs: FieldChange[] = changes
+        .filter(([key, value]) => (row[key] ?? null) !== value)
+        .map(([key, value]) => ({ field: key, from: row[key] ?? null, to: value }));
+      if (diffs.length > 0) {
+        activities.push({
+          investorId: row.id,
+          companyId: context.companyId,
+          kind: "field_change",
+          actor: context.actor,
+          details: { changes: diffs, ...(ids.length > 1 ? { bulk: true } : {}) },
+        });
+      }
+    }
+    await logActivities(client, activities);
+
+    const rows = await loadInvestors(client, before.rows.map((row) => row.id), context.companyId);
+    return { rows, changedCount: activities.length };
+  });
 }

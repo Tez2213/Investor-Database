@@ -12,8 +12,10 @@ import type {
 } from "../../lib/types";
 import { SOURCE_STYLES, formatCount, investorCode } from "../../lib/format";
 import { downloadCsv, investorsToCsv } from "../../lib/csv";
-import { BulkActionsMenu } from "./BulkActionsMenu";
+import { track } from "../../lib/track";
 import { useDebouncedValue } from "../../lib/useDebouncedValue";
+import { AppHeader } from "../AppHeader";
+import { BulkActionsMenu } from "./BulkActionsMenu";
 import { FilterBar } from "./FilterBar";
 import { InvestorsTable } from "./InvestorsTable";
 import { InvestorDrawer } from "./InvestorDrawer";
@@ -26,12 +28,29 @@ const DEFAULT_NON_SEARCH_FILTERS: NonSearchFilters = {
   industry: "",
   title: "",
   quality: "",
+  teamScore: "",
+  source: "",
   hasEmail: "all",
   hasLinkedIn: "all",
 };
 
+const TEXT_FILTER_KEYS = ["country", "city", "industry", "title", "quality", "teamScore", "source"] as const;
+
 function parseHasParam(value: string | null): HasFilterValue {
   return value === "yes" || value === "no" ? value : "all";
+}
+
+function buildParams(activeFilters: InvestorFilters, cursor: number) {
+  const params = new URLSearchParams();
+  params.set("limit", "50");
+  if (activeFilters.search) params.set("search", activeFilters.search);
+  for (const key of TEXT_FILTER_KEYS) {
+    if (activeFilters[key]) params.set(key, activeFilters[key]);
+  }
+  if (activeFilters.hasEmail !== "all") params.set("hasEmail", activeFilters.hasEmail);
+  if (activeFilters.hasLinkedIn !== "all") params.set("hasLinkedIn", activeFilters.hasLinkedIn);
+  if (cursor > 0) params.set("cursor", String(cursor));
+  return params;
 }
 
 export function InvestorDashboard() {
@@ -39,147 +58,98 @@ export function InvestorDashboard() {
   const router = useRouter();
   const pathname = usePathname();
 
-  const [searchInput, setSearchInput] = useState(
-    () => searchParams.get("search") ?? ""
-  );
+  const [searchInput, setSearchInput] = useState(() => searchParams.get("search") ?? "");
   const [filters, setFilters] = useState<NonSearchFilters>(() => ({
-    country: searchParams.get("country") ?? "",
-    city: searchParams.get("city") ?? "",
-    industry: searchParams.get("industry") ?? "",
-    title: searchParams.get("title") ?? "",
-    quality: searchParams.get("quality") ?? "",
+    ...Object.fromEntries(TEXT_FILTER_KEYS.map((key) => [key, searchParams.get(key) ?? ""])),
     hasEmail: parseHasParam(searchParams.get("hasEmail")),
     hasLinkedIn: parseHasParam(searchParams.get("hasLinkedIn")),
-  }));
+  }) as NonSearchFilters);
 
-  const debouncedSearch = useDebouncedValue(searchInput, 400);
+  const debouncedSearch = useDebouncedValue(searchInput, 350);
 
   const effectiveFilters: InvestorFilters = useMemo(
     () => ({ ...filters, search: debouncedSearch }),
     [filters, debouncedSearch]
   );
+  const filtersKey = buildParams(effectiveFilters, 0).toString();
 
   const [investors, setInvestors] = useState<Investor[]>([]);
   const [hasMore, setHasMore] = useState(true);
   const [isInitialLoading, setIsInitialLoading] = useState(true);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [selectedInvestor, setSelectedInvestor] = useState<Investor | null>(
-    null
-  );
-  const [filterOptions, setFilterOptions] = useState<FilterOptions | null>(
-    null
-  );
+  const [selectedInvestor, setSelectedInvestor] = useState<Investor | null>(null);
+  const [filterOptions, setFilterOptions] = useState<FilterOptions | null>(null);
   const [totalInvestors, setTotalInvestors] = useState<number | null>(null);
   // Checked rows persist across searches so a list can be built from several queries.
-  const [checked, setChecked] = useState<Map<Investor["id"], Investor>>(
-    () => new Map()
-  );
+  const [checked, setChecked] = useState<Map<Investor["id"], Investor>>(() => new Map());
 
   const cursorRef = useRef(0);
-  const loadingRef = useRef(false);
-  const requestIdRef = useRef(0);
+  const loadingMoreRef = useRef(false);
+  const abortRef = useRef<AbortController | null>(null);
 
-  const buildParams = useCallback(
-    (activeFilters: InvestorFilters, cursor: number) => {
-      const params = new URLSearchParams();
-      params.set("limit", "50");
+  /**
+   * Loads a page. A reset (new search/filters) cancels whatever is in flight so
+   * results always match the latest query; "load more" is skipped while busy.
+   */
+  const fetchPage = useCallback(async (activeFilters: InvestorFilters, cursor: number, reset: boolean) => {
+    if (!reset && loadingMoreRef.current) return;
 
-      if (activeFilters.search) params.set("search", activeFilters.search);
-      if (activeFilters.country) params.set("country", activeFilters.country);
-      if (activeFilters.city) params.set("city", activeFilters.city);
-      if (activeFilters.industry) params.set("industry", activeFilters.industry);
-      if (activeFilters.title) params.set("title", activeFilters.title);
-      if (activeFilters.quality) params.set("quality", activeFilters.quality);
-      if (activeFilters.hasEmail !== "all") {
-        params.set("hasEmail", activeFilters.hasEmail);
-      }
-      if (activeFilters.hasLinkedIn !== "all") {
-        params.set("hasLinkedIn", activeFilters.hasLinkedIn);
-      }
-      if (cursor > 0) params.set("cursor", String(cursor));
+    if (reset) {
+      abortRef.current?.abort();
+      setIsInitialLoading(true);
+      setHasMore(true);
+    } else {
+      loadingMoreRef.current = true;
+      setIsLoadingMore(true);
+    }
+    const controller = new AbortController();
+    if (reset) abortRef.current = controller;
+    setError(null);
 
-      return params;
-    },
-    []
-  );
+    try {
+      const response = await fetch(`/api/investors?${buildParams(activeFilters, cursor).toString()}`, {
+        signal: controller.signal,
+      });
+      if (!response.ok) throw new Error(`Request failed with status ${response.status}`);
+      const result: InvestorsResponse = await response.json();
+      if (controller.signal.aborted) return;
 
-  const fetchPage = useCallback(
-    async (activeFilters: InvestorFilters, cursor: number, reset: boolean) => {
-      if (loadingRef.current) return;
-      loadingRef.current = true;
-
-      const requestId = ++requestIdRef.current;
-
+      setInvestors((previous) => (reset ? result.data : [...previous, ...result.data]));
+      cursorRef.current = result.nextCursor ?? 0;
+      setHasMore(result.hasMore);
+    } catch (err) {
+      if (controller.signal.aborted) return;
+      setError(err instanceof Error ? err.message : "Unexpected error occurred");
+      if (reset) setInvestors([]);
+      setHasMore(false);
+    } finally {
       if (reset) {
-        setIsInitialLoading(true);
-        setHasMore(true);
+        if (!controller.signal.aborted) setIsInitialLoading(false);
       } else {
-        setIsLoadingMore(true);
+        loadingMoreRef.current = false;
+        setIsLoadingMore(false);
       }
-      setError(null);
+    }
+  }, []);
 
-      try {
-        const params = buildParams(activeFilters, cursor);
-        const response = await fetch(`/api/investors?${params.toString()}`);
-
-        if (!response.ok) {
-          throw new Error(`Request failed with status ${response.status}`);
-        }
-
-        const result: InvestorsResponse = await response.json();
-
-        if (requestId !== requestIdRef.current) return;
-
-        setInvestors((previous) =>
-          reset ? result.data : [...previous, ...result.data]
-        );
-        cursorRef.current = result.nextCursor ?? 0;
-        setHasMore(result.hasMore);
-      } catch (err) {
-        if (requestId !== requestIdRef.current) return;
-        setError(
-          err instanceof Error ? err.message : "Unexpected error occurred"
-        );
-        if (reset) setInvestors([]);
-        setHasMore(false);
-      } finally {
-        if (requestId === requestIdRef.current) {
-          setIsInitialLoading(false);
-          setIsLoadingMore(false);
-        }
-        loadingRef.current = false;
-      }
-    },
-    [buildParams]
-  );
-
-  // Reload from scratch whenever the effective filters change, and keep the
-  // URL in sync so searches/filters are shareable and survive a refresh.
+  // Reload whenever the filters change, and keep the URL in sync so searches
+  // and filters are shareable and survive a refresh.
   useEffect(() => {
     cursorRef.current = 0;
-    // Data-fetching-on-dependency-change effect: fetchPage synchronously
-    // resets loading/hasMore state before issuing the request, which is the
-    // standard React pattern for fetch effects (react.dev/learn/synchronizing-with-effects#fetching-data).
+    loadingMoreRef.current = false;
+    // Data-fetching-on-dependency-change effect (react.dev/learn/synchronizing-with-effects#fetching-data).
     // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchPage(effectiveFilters, 0, true);
 
-    const params = buildParams(effectiveFilters, 0);
-    const query = params.toString();
-    router.replace(query ? `${pathname}?${query}` : pathname, {
-      scroll: false,
-    });
+    const query = buildParams(effectiveFilters, 0);
+    query.delete("limit");
+    const queryString = query.toString();
+    router.replace(queryString ? `${pathname}?${queryString}` : pathname, { scroll: false });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [
-    effectiveFilters.search,
-    effectiveFilters.country,
-    effectiveFilters.city,
-    effectiveFilters.industry,
-    effectiveFilters.title,
-    effectiveFilters.quality,
-    effectiveFilters.hasEmail,
-    effectiveFilters.hasLinkedIn,
-  ]);
+  }, [filtersKey]);
+
+  useEffect(() => () => abortRef.current?.abort(), []);
 
   const loadFilterOptions = useCallback(() => {
     fetch("/api/investors/filters")
@@ -190,43 +160,33 @@ export function InvestorDashboard() {
 
   useEffect(() => {
     loadFilterOptions();
-
     fetch("/api/stats")
       .then((res) => (res.ok ? res.json() : null))
-      .then((data: { totalInvestors: number } | null) =>
-        data && setTotalInvestors(data.totalInvestors)
-      )
+      .then((data: { totalInvestors: number } | null) => data && setTotalInvestors(data.totalInvestors))
       .catch(() => undefined);
   }, [loadFilterOptions]);
 
   // Swap freshly saved rows into the list, the selection and the open drawer.
-  const applyUpdatedInvestors = useCallback(
-    (rows: Investor[]) => {
-      const updated = new Map<Investor["id"], Investor>(
-        rows.map((investor) => [investor.id, investor])
-      );
-      setInvestors((previous) =>
-        previous.map((investor) => updated.get(investor.id) ?? investor)
-      );
-      setChecked((previous) => {
-        if (!rows.some((investor) => previous.has(investor.id))) return previous;
-        const next = new Map(previous);
-        for (const [id, investor] of updated) {
-          if (next.has(id)) next.set(id, investor);
-        }
-        return next;
-      });
-      setSelectedInvestor((current) =>
-        current ? updated.get(current.id) ?? current : current
-      );
-      loadFilterOptions();
-    },
-    [loadFilterOptions]
-  );
+  const applyUpdatedInvestors = useCallback((rows: Investor[]) => {
+    const updated = new Map<Investor["id"], Investor>(rows.map((investor) => [investor.id, investor]));
+    setInvestors((previous) => previous.map((investor) => updated.get(investor.id) ?? investor));
+    setChecked((previous) => {
+      if (!rows.some((investor) => previous.has(investor.id))) return previous;
+      const next = new Map(previous);
+      for (const [id, investor] of updated) {
+        if (next.has(id)) next.set(id, investor);
+      }
+      return next;
+    });
+    setSelectedInvestor((current) => (current ? updated.get(current.id) ?? current : current));
+  }, []);
 
   const handleInvestorSaved = useCallback(
-    (updated: Investor) => applyUpdatedInvestors([updated]),
-    [applyUpdatedInvestors]
+    (updated: Investor) => {
+      applyUpdatedInvestors([updated]);
+      loadFilterOptions();
+    },
+    [applyUpdatedInvestors, loadFilterOptions]
   );
 
   const handleToggleChecked = useCallback((investor: Investor) => {
@@ -254,12 +214,12 @@ export function InvestorDashboard() {
     const rows = Array.from(checked.values());
     if (rows.length === 0) return;
     const date = new Date().toISOString().slice(0, 10);
-    downloadCsv(`investors-${date}-${rows.length}.csv`, investorsToCsv(rows));
+    const fileName = `investors-${date}-${rows.length}.csv`;
+    downloadCsv(fileName, investorsToCsv(rows));
+    track("csv_exported", { rows: rows.length, fileName });
   }, [checked]);
 
-  const [notice, setNotice] = useState<{ text: string; tone: "ok" | "error" } | null>(
-    null
-  );
+  const [notice, setNotice] = useState<{ text: string; tone: "ok" | "error" } | null>(null);
   const noticeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [isBulkSaving, setIsBulkSaving] = useState(false);
 
@@ -270,7 +230,7 @@ export function InvestorDashboard() {
   }, []);
 
   const copyValues = useCallback(
-    async (values: (string | null)[], label: string) => {
+    async (values: (string | null)[], label: string, action: "emails_copied" | "linkedin_copied") => {
       const unique = Array.from(new Set(values.filter((value): value is string => Boolean(value))));
       if (unique.length === 0) {
         showNotice(`None of the selected investors have ${label}.`, "error");
@@ -279,6 +239,7 @@ export function InvestorDashboard() {
       try {
         await navigator.clipboard.writeText(unique.join("\n"));
         showNotice(`Copied ${unique.length.toLocaleString()} ${label} to clipboard.`);
+        track(action, { count: unique.length });
       } catch {
         showNotice("Could not access the clipboard.", "error");
       }
@@ -299,16 +260,15 @@ export function InvestorDashboard() {
           body: JSON.stringify({ ids, changes: { quality } }),
         });
         const result = await response.json().catch(() => null);
-        if (!response.ok) {
-          throw new Error(result?.error ?? `Update failed (status ${response.status})`);
-        }
+        if (!response.ok) throw new Error(result?.error ?? `Update failed (status ${response.status})`);
 
         const rows = result.data as Investor[];
         applyUpdatedInvestors(rows);
+        loadFilterOptions();
         showNotice(
           quality
-            ? `Set quality to "${quality}" for ${rows.length.toLocaleString()} investors.`
-            : `Cleared quality for ${rows.length.toLocaleString()} investors.`
+            ? `Set your quality to "${quality}" for ${rows.length.toLocaleString()} investors.`
+            : `Cleared your quality for ${rows.length.toLocaleString()} investors.`
         );
       } catch (err) {
         showNotice(err instanceof Error ? err.message : "Update failed", "error");
@@ -316,28 +276,29 @@ export function InvestorDashboard() {
         setIsBulkSaving(false);
       }
     },
-    [checked, applyUpdatedInvestors, showNotice]
+    [checked, applyUpdatedInvestors, loadFilterOptions, showNotice]
   );
 
+  // Shows the new rating immediately, then confirms with the server (or rolls back).
   const handleRowQuality = useCallback(
     async (investor: Investor, quality: string | null) => {
+      applyUpdatedInvestors([{ ...investor, quality }]);
       try {
-        const response = await fetch(`/api/investors/${investor.id}`, {
+        const response = await fetch(`/api/investors/${investor.id}/company`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ quality }),
         });
         const result = await response.json().catch(() => null);
-        if (!response.ok) {
-          throw new Error(result?.error ?? `Update failed (status ${response.status})`);
-        }
+        if (!response.ok) throw new Error(result?.error ?? `Update failed (status ${response.status})`);
         applyUpdatedInvestors([result.data as Investor]);
         showNotice(
           quality
-            ? `${investorCode(investor.id)}: quality set to "${quality}".`
-            : `${investorCode(investor.id)}: quality cleared.`
+            ? `${investorCode(investor.id)}: your quality set to "${quality}".`
+            : `${investorCode(investor.id)}: your quality cleared.`
         );
       } catch (err) {
+        applyUpdatedInvestors([investor]);
         showNotice(err instanceof Error ? err.message : "Update failed", "error");
       }
     },
@@ -349,33 +310,28 @@ export function InvestorDashboard() {
   const handleCloseDrawer = useCallback(() => setSelectedInvestor(null), []);
 
   const loadMore = useCallback(() => {
-    if (loadingRef.current || !hasMore) return;
+    if (loadingMoreRef.current || isInitialLoading || !hasMore) return;
     fetchPage(effectiveFilters, cursorRef.current, false);
-  }, [effectiveFilters, fetchPage, hasMore]);
+  }, [effectiveFilters, fetchPage, hasMore, isInitialLoading]);
 
   const observerRef = useRef<IntersectionObserver | null>(null);
   const sentinelRef = useCallback(
     (node: HTMLTableRowElement | null) => {
       if (observerRef.current) observerRef.current.disconnect();
-
       observerRef.current = new IntersectionObserver(
         (entries) => {
           if (entries[0]?.isIntersecting) loadMore();
         },
-        { rootMargin: "400px" }
+        { rootMargin: "600px" }
       );
-
       if (node) observerRef.current.observe(node);
     },
     [loadMore]
   );
 
-  const handleFilterChange = useCallback(
-    <K extends keyof NonSearchFilters>(key: K, value: NonSearchFilters[K]) => {
-      setFilters((previous) => ({ ...previous, [key]: value }));
-    },
-    []
-  );
+  const handleFilterChange = useCallback(<K extends keyof NonSearchFilters>(key: K, value: NonSearchFilters[K]) => {
+    setFilters((previous) => ({ ...previous, [key]: value }));
+  }, []);
 
   const handleReset = useCallback(() => {
     setSearchInput("");
@@ -390,40 +346,25 @@ export function InvestorDashboard() {
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900">
-      <header className="sticky top-0 z-30 border-b border-slate-200 bg-white/90 backdrop-blur">
-        <div className="mx-auto flex max-w-[1600px] items-center justify-between px-6 py-5">
-          <div>
-            <h1 className="text-xl font-semibold tracking-tight text-slate-900">
-              Investor Database
-            </h1>
-            <p className="text-sm text-slate-500">
-              Search and explore your investor network
-            </p>
-          </div>
-
-          <div className="flex flex-wrap items-center justify-end gap-3">
-            <div className="flex items-center gap-3 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-600">
-              <span className="font-semibold uppercase tracking-wide text-slate-400">
-                Legend
-              </span>
-              {(Object.keys(SOURCE_STYLES) as FieldSource[]).map((source) => (
-                <span
-                  key={source}
-                  title={SOURCE_STYLES[source].description}
-                  className={`${SOURCE_STYLES[source].highlight} cursor-help font-medium`}
-                >
-                  {SOURCE_STYLES[source].label}
-                </span>
-              ))}
-            </div>
-
-            <div className="flex items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-4 py-2 text-sm font-medium text-slate-700">
-              <span className="h-2 w-2 rounded-full bg-emerald-500" />
-              {formatCount(totalInvestors)} Investors
-            </div>
-          </div>
+      <AppHeader>
+        <div className="hidden items-center gap-3 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-600 xl:flex">
+          <span className="font-semibold uppercase tracking-wide text-slate-400">Legend</span>
+          {(Object.keys(SOURCE_STYLES) as FieldSource[]).map((source) => (
+            <span
+              key={source}
+              title={SOURCE_STYLES[source].description}
+              className={`${SOURCE_STYLES[source].highlight} cursor-help font-medium`}
+            >
+              {SOURCE_STYLES[source].label}
+            </span>
+          ))}
         </div>
-      </header>
+
+        <div className="flex items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-4 py-1.5 text-sm font-medium text-slate-700">
+          <span className="h-2 w-2 rounded-full bg-emerald-500" />
+          {formatCount(totalInvestors)} Investors
+        </div>
+      </AppHeader>
 
       {notice && (
         <div
@@ -456,9 +397,7 @@ export function InvestorDashboard() {
               <div className="text-sm text-slate-500">
                 {isInitialLoading
                   ? "Loading investors..."
-                  : `Showing ${investors.length.toLocaleString()} loaded record${
-                      investors.length === 1 ? "" : "s"
-                    }`}
+                  : `Showing ${investors.length.toLocaleString()} loaded record${investors.length === 1 ? "" : "s"}`}
               </div>
             </div>
 
@@ -476,11 +415,9 @@ export function InvestorDashboard() {
                 </button>
                 <BulkActionsMenu
                   disabled={isBulkSaving}
-                  onCopyEmails={() =>
-                    copyValues(Array.from(checked.values(), (i) => i.email), "emails")
-                  }
+                  onCopyEmails={() => copyValues(Array.from(checked.values(), (i) => i.email), "emails", "emails_copied")}
                   onCopyLinkedIn={() =>
-                    copyValues(Array.from(checked.values(), (i) => i.linkedin), "LinkedIn URLs")
+                    copyValues(Array.from(checked.values(), (i) => i.linkedin), "LinkedIn URLs", "linkedin_copied")
                   }
                   onSetQuality={handleBulkQuality}
                 />

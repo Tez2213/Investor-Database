@@ -49,6 +49,21 @@ export function initials(
   return combined || "?";
 }
 
+/** "Tejasvi Kesarwani" → "TK"; "hello@x.com" → "HE". */
+export function initialsOf(name: string): string {
+  const parts = name.trim().split(/[\s@._-]+/).filter(Boolean);
+  const letters = parts.length > 1 ? parts[0][0] + parts[1][0] : parts[0]?.slice(0, 2) ?? "";
+  return letters.toUpperCase() || "?";
+}
+
+/** Team score (1–3) as a label: High ≥ 2.5, Medium ≥ 1.5, otherwise Low. */
+export function teamScoreLabel(score: number | null): "High" | "Medium" | "Low" | null {
+  if (score == null) return null;
+  if (score >= 2.5) return "High";
+  if (score >= 1.5) return "Medium";
+  return "Low";
+}
+
 export function qualityBadgeClass(quality: string): string {
   return QUALITY_STYLES[quality.toLowerCase()] ?? CUSTOM_QUALITY_STYLE;
 }
@@ -69,6 +84,51 @@ export function parseInvestorCode(text: string): number | null {
 export function formatCount(value: number | null): string {
   if (value === null) return "—";
   return value.toLocaleString("en-US");
+}
+
+function startOfDay(date: Date): number {
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
+}
+
+/** "Today", "Yesterday", "September 26" or "September 26, 2025" (other years). */
+export function dayLabel(value: string | Date): string {
+  const date = new Date(value);
+  const days = Math.round((startOfDay(new Date()) - startOfDay(date)) / 86_400_000);
+  if (days === 0) return "Today";
+  if (days === 1) return "Yesterday";
+  return date.toLocaleDateString("en-US", {
+    month: "long",
+    day: "numeric",
+    ...(date.getFullYear() !== new Date().getFullYear() ? { year: "numeric" } : {}),
+  });
+}
+
+/** "12:13 PM" */
+export function formatTime(value: string | Date): string {
+  return new Date(value).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
+}
+
+/** "Sep 26, 2026, 9:34 AM" */
+export function formatDateTime(value: string | Date): string {
+  return new Date(value).toLocaleString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
+
+/** Compact date for lists: time today, "Sep 26" this year, "Sep 26, 2025" otherwise. */
+export function formatShortDate(value: string | Date): string {
+  const date = new Date(value);
+  const now = new Date();
+  if (startOfDay(date) === startOfDay(now)) return formatTime(date);
+  return date.toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    ...(date.getFullYear() !== now.getFullYear() ? { year: "numeric" } : {}),
+  });
 }
 
 /** Returns a safe https link for a stored URL, or null when the value isn't a URL. */

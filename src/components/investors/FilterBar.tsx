@@ -1,9 +1,11 @@
 "use client";
 
-import type {
-  FilterOptions,
-  HasFilterValue,
-  InvestorFilters,
+import { COMPANIES } from "../../lib/companies";
+import {
+  TEAM_SCORE_OPTIONS,
+  type FilterOptions,
+  type HasFilterValue,
+  type InvestorFilters,
 } from "../../lib/types";
 import { SearchableSelect } from "./SearchableSelect";
 
@@ -103,10 +105,47 @@ export function FilterBar({
               : "border-slate-200 bg-white text-slate-500"
           }`}
         >
-          <option value="">All Quality</option>
+          <option value="">Your quality: all</option>
           {(filterOptions?.qualities ?? []).map((quality) => (
             <option key={quality} value={quality}>
               {quality}
+            </option>
+          ))}
+        </select>
+
+        <select
+          value={filters.teamScore}
+          onChange={(event) => onFilterChange("teamScore", event.target.value)}
+          title="Average rating across all three companies"
+          className={`rounded-lg border px-3 py-2 text-sm outline-none focus:ring-4 focus:ring-indigo-100 ${
+            filters.teamScore
+              ? "border-indigo-200 bg-indigo-50/60 text-indigo-900"
+              : "border-slate-200 bg-white text-slate-500"
+          }`}
+        >
+          <option value="">Team score: all</option>
+          {TEAM_SCORE_OPTIONS.map((option) => (
+            <option key={option.value} value={option.value}>
+              Team score: {option.label}
+            </option>
+          ))}
+        </select>
+
+        <select
+          value={filters.source}
+          onChange={(event) => onFilterChange("source", event.target.value)}
+          className={`rounded-lg border px-3 py-2 text-sm outline-none focus:ring-4 focus:ring-indigo-100 ${
+            filters.source
+              ? "border-indigo-200 bg-indigo-50/60 text-indigo-900"
+              : "border-slate-200 bg-white text-slate-500"
+          }`}
+        >
+          <option value="">Source: all leads</option>
+          <option value="original">Source: original database</option>
+          <option value="uploaded">Source: uploaded by any company</option>
+          {COMPANIES.map((company) => (
+            <option key={company.id} value={company.id}>
+              Source: added by {company.name}
             </option>
           ))}
         </select>

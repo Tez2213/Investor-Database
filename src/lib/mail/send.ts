@@ -1,0 +1,96 @@
+import { randomUUID } from "node:crypto";
+import nodemailer from "nodemailer";
+import { getCompanyMailConfig, type ServerConfig } from "./config";
+
+type SmtpTransport = ReturnType<typeof createSmtpTransport>;
+
+const globalForMail = globalThis as unknown as {
+  smtpTransports?: Map<string, SmtpTransport>;
+};
+
+function createSmtpTransport(config: ServerConfig) {
+  return nodemailer.createTransport({
+    host: config.host,
+    port: config.port,
+    secure: config.secure,
+    auth: { user: config.user, pass: config.pass },
+    connectionTimeout: 15_000,
+    greetingTimeout: 10_000,
+    socketTimeout: 30_000,
+  });
+}
+
+/** One reusable SMTP connection setup per mailbox. */
+function getSmtpTransport(config: ServerConfig): SmtpTransport {
+  globalForMail.smtpTransports ??= new Map();
+  const key = `${config.host}:${config.port}:${config.secure}:${config.user}:${config.pass.length}`;
+  let transport = globalForMail.smtpTransports.get(key);
+  if (!transport) {
+    transport = createSmtpTransport(config);
+    globalForMail.smtpTransports.set(key, transport);
+  }
+  return transport;
+}
+
+// Builds the MIME message without sending it, so the exact bytes can be both
+// sent over SMTP and saved into the IMAP Sent folder.
+const composer = nodemailer.createTransport({ streamTransport: true, buffer: true, newline: "windows" });
+
+export type OutgoingEmail = {
+  to: string[];
+  cc: string[];
+  subject: string;
+  text: string;
+  html: string;
+  inReplyTo?: string | null;
+  references?: string[];
+};
+
+export type SendResult = {
+  messageId: string;
+  fromAddress: string;
+  fromName: string | null;
+  raw: Buffer;
+  /** Set when the SMTP server rejected the message or could not be reached. */
+  error: string | null;
+};
+
+export function isSmtpConfigured(companyId: string): boolean {
+  return getCompanyMailConfig(companyId).smtp !== null;
+}
+
+export async function sendEmail(companyId: string, email: OutgoingEmail): Promise<SendResult> {
+  const { smtp, sender } = getCompanyMailConfig(companyId);
+  if (!smtp || !sender.address) {
+    throw new Error("Email sending is not configured for this company");
+  }
+
+  const domain = sender.address.split("@")[1] ?? "localhost";
+  const messageId = `<${randomUUID()}@${domain}>`;
+
+  const built = await composer.sendMail({
+    from: sender.name ? { name: sender.name, address: sender.address } : sender.address,
+    to: email.to,
+    cc: email.cc.length > 0 ? email.cc : undefined,
+    subject: email.subject,
+    text: email.text,
+    html: email.html,
+    messageId,
+    inReplyTo: email.inReplyTo ?? undefined,
+    references: email.references && email.references.length > 0 ? email.references : undefined,
+    date: new Date(),
+  });
+  const raw = built.message as Buffer;
+
+  let error: string | null = null;
+  try {
+    await getSmtpTransport(smtp).sendMail({
+      envelope: { from: sender.address, to: [...email.to, ...email.cc] },
+      raw,
+    });
+  } catch (sendError) {
+    error = sendError instanceof Error ? sendError.message : "Failed to send email";
+  }
+
+  return { messageId, fromAddress: sender.address, fromName: sender.name, raw, error };
+}

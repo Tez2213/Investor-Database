@@ -2,6 +2,7 @@
 
 import type { Investor } from "../../lib/types";
 import { fullName, initials, sourceHighlight } from "../../lib/format";
+import { SourceWatermark, TeamScoreBadge } from "./Badges";
 import { InvestorIdBadge } from "./InvestorIdBadge";
 import { QualitySelect } from "./QualitySelect";
 
@@ -20,7 +21,7 @@ type InvestorsTableProps = {
   onQualityChange: (investor: Investor, quality: string | null) => Promise<void>;
 };
 
-const COLUMN_COUNT = 8;
+const COLUMN_COUNT = 9;
 
 const CHECKBOX_CLASS =
   "h-4 w-4 cursor-pointer rounded border-slate-300 accent-indigo-600";
@@ -113,7 +114,7 @@ export function InvestorsTable({
 
   return (
     <div className="overflow-x-auto">
-      <table className="w-full min-w-[1080px] text-left text-sm">
+      <table className="w-full min-w-[1200px] text-left text-sm">
         <thead className="sticky top-0 z-10 border-b border-slate-200 bg-slate-50/95 text-xs font-semibold uppercase tracking-wide text-slate-500 backdrop-blur">
           <tr>
             <th className="w-12 py-3 pl-5 pr-0">
@@ -135,7 +136,10 @@ export function InvestorsTable({
             <th className="px-5 py-3">Industry</th>
             <th className="px-5 py-3">Location</th>
             <th className="px-5 py-3">Contact</th>
-            <th className="px-5 py-3">Quality</th>
+            <th className="px-5 py-3">Your quality</th>
+            <th className="px-5 py-3" title="Average rating across all three companies">
+              Team score
+            </th>
           </tr>
         </thead>
 
@@ -184,10 +188,11 @@ export function InvestorsTable({
                         {initials(investor.first_name, investor.last_name)}
                       </div>
                       <div className="min-w-0">
-                        <div className="truncate font-medium text-slate-900">
-                          <span className={sourceHighlight(sources.first_name ?? sources.last_name)}>
+                        <div className="flex min-w-0 items-center gap-2 font-medium text-slate-900">
+                          <span className={`truncate ${sourceHighlight(sources.first_name ?? sources.last_name)}`}>
                             {name || "—"}
                           </span>
+                          <SourceWatermark companyId={investor.source_company_id} compact />
                         </div>
                         <div className="truncate text-xs text-slate-500">
                           <span className={sourceHighlight(sources.title)}>
@@ -250,6 +255,10 @@ export function InvestorsTable({
                     onClick={(event) => event.stopPropagation()}
                   >
                     <QualitySelect investor={investor} onChange={onQualityChange} />
+                  </td>
+
+                  <td className="whitespace-nowrap px-5 py-3.5">
+                    <TeamScoreBadge investor={investor} />
                   </td>
                 </tr>
               );

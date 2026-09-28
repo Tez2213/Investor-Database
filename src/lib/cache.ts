@@ -6,6 +6,7 @@ type CacheEntry<T> = {
 const store = new Map<string, CacheEntry<unknown>>();
 
 export const FILTER_OPTIONS_CACHE_KEY = "investor-filter-options";
+export const TOTAL_COUNT_CACHE_KEY = "investor-total-count";
 
 export function invalidateCache(key: string) {
   store.delete(key);
