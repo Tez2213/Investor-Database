@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { pool } from "../../../../lib/db";
 import { auditLater } from "../../../../lib/audit";
 import { actorName, requireSession } from "../../../../lib/auth/session";
+import { accessibleInvestorIds, isRestricted } from "../../../../lib/access";
 import { withTransaction } from "../../../../lib/activity";
 import { FILTER_OPTIONS_CACHE_KEY, TOTAL_COUNT_CACHE_KEY, invalidateCache } from "../../../../lib/cache";
 import { parseId } from "../../../../lib/parseId";
@@ -159,11 +160,35 @@ export async function POST(request: NextRequest) {
         }
       }
 
+      // Someone limited to assigned investors keeps access to the leads they add themselves.
+      if (isRestricted(session) && insertedIds.length > 0) {
+        const batch = await client.query<{ id: string }>(
+          `INSERT INTO assignment_batches (user_id, description, criteria, added_count, created_by)
+           VALUES ($1, $2, $3, $4, $5) RETURNING id`,
+          [
+            session.userId,
+            `Leads they added${fileName ? ` (${fileName})` : ""}`,
+            JSON.stringify({ importId }),
+            insertedIds.length,
+            actorName(session),
+          ]
+        );
+        await client.query(
+          `INSERT INTO user_investor_assignments (user_id, investor_id, batch_id, assigned_by)
+           SELECT $1, unnest($2::bigint[]), $3, $4
+           ON CONFLICT (user_id, investor_id) DO NOTHING`,
+          [session.userId, insertedIds.map((row) => row.id), batch.rows[0].id, actorName(session)]
+        );
+      }
+
       await client.query(
         `UPDATE lead_imports SET inserted = inserted + $2, duplicates = duplicates + $3, invalid = invalid + $4
          WHERE id = $1`,
         [importId, insertedIds.length, duplicates, invalid]
       );
+
+      // Only point to existing investors this person is allowed to open.
+      const visibleDuplicates = await accessibleInvestorIds(client, session, Array.from(duplicateIds));
 
       return {
         id: importId!,
@@ -172,7 +197,7 @@ export async function POST(request: NextRequest) {
         duplicates,
         invalid,
         insertedIds: insertedIds.map((row) => row.id),
-        duplicateIds: Array.from(duplicateIds),
+        duplicateIds: Array.from(visibleDuplicates),
       };
     });
 

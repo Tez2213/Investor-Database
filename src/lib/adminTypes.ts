@@ -10,6 +10,65 @@ export type AdminUserRow = {
   last_login_at: string | null;
   last_seen_at: string | null;
   actions_7d: number;
+  /** "assigned": a member who only sees investors assigned to them. */
+  access_mode: "all" | "assigned";
+  assigned_count: number;
+};
+
+export type AssignedInvestorRow = {
+  id: string;
+  first_name: string | null;
+  last_name: string | null;
+  title: string | null;
+  company_name: string | null;
+  country: string | null;
+  email: string | null;
+  assigned_at: string;
+  assigned_by: string | null;
+  batch_description: string | null;
+};
+
+export type AssignmentBatchRow = {
+  id: string;
+  description: string;
+  added_count: number;
+  current_count: number;
+  created_by: string | null;
+  created_at: string;
+};
+
+export type AssignmentsResponse = {
+  user: { id: string; email: string; name: string | null; company_id: string; role: "admin" | "member"; access_mode: "all" | "assigned" };
+  total: number;
+  minId: string | null;
+  maxId: string | null;
+  batches: AssignmentBatchRow[];
+  data: AssignedInvestorRow[];
+  nextCursor: string | null;
+};
+
+export type AssignmentPreview = {
+  description: string;
+  matched: number;
+  alreadyAssigned: number;
+  toAdd: number;
+  assignedToTeammates: number;
+  notFound: number;
+  minId: string | null;
+  maxId: string | null;
+  sample: { id: string; first_name: string | null; last_name: string | null; company_name: string | null; country: string | null }[];
+};
+
+export type PickerInvestorRow = {
+  id: string;
+  first_name: string | null;
+  last_name: string | null;
+  title: string | null;
+  company_name: string | null;
+  country: string | null;
+  email: string | null;
+  assigned_to_user: boolean;
+  other_assignees: { name: string; company_id: string }[];
 };
 
 export type AuditRow = {
@@ -64,6 +123,9 @@ export const AUDIT_ACTION_LABELS: Record<string, string> = {
   admin_login: "Signed in to admin portal",
   admin_login_failed: "Failed admin portal sign-in",
   admin_logout: "Signed out of admin portal",
+  assignments_added: "Assigned investors",
+  assignments_removed: "Removed assignments",
+  assignments_transferred: "Transferred assignments",
   workspace_switched: "Switched workspace",
   profile_name_changed: "Changed their name",
   password_changed: "Changed their password",

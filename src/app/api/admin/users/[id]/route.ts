@@ -63,6 +63,14 @@ export async function PATCH(
     changed.password = "reset";
     signOut = true;
   }
+  if ("access_mode" in body) {
+    if (body.access_mode !== "all" && body.access_mode !== "assigned") {
+      return NextResponse.json({ error: "Access must be all or assigned" }, { status: 400 });
+    }
+    values.push(body.access_mode);
+    sets.push(`access_mode = $${values.length}`);
+    changed.access_mode = body.access_mode;
+  }
   if (sets.length === 0) return NextResponse.json({ error: "Nothing to update" }, { status: 400 });
 
   try {

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { pool } from "../../../../lib/db";
 import { auditLater } from "../../../../lib/audit";
 import { actorName, requireSession } from "../../../../lib/auth/session";
+import { accessibleInvestorIds } from "../../../../lib/access";
 import { FILTER_OPTIONS_CACHE_KEY, invalidateCache } from "../../../../lib/cache";
 import { parseCompanyDataChanges, updateCompanyData } from "../../../../lib/companyData";
 import { applyInvestorChanges, parseInvestorChanges } from "../../../../lib/investorChanges";
@@ -56,6 +57,15 @@ export async function POST(request: NextRequest) {
 
   const actor = actorName(session);
   try {
+    const allowed = await accessibleInvestorIds(pool, session, numericIds);
+    if (allowed.size < numericIds.length) {
+      const blocked = numericIds.length - allowed.size;
+      return NextResponse.json(
+        { error: `${blocked} of the selected investors ${blocked === 1 ? "isn't" : "aren't"} assigned to you. Nothing was changed.` },
+        { status: 403 }
+      );
+    }
+
     if (sharedChanges) {
       await applyInvestorChanges(pool, numericIds, sharedChanges.changes, { actor, companyId: session.companyId });
       invalidateCache(FILTER_OPTIONS_CACHE_KEY);

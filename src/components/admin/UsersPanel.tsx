@@ -29,6 +29,7 @@ function AddUserForm({ onCreated }: { onCreated: (message: string) => void }) {
   const [email, setEmail] = useState("");
   const [name, setName] = useState("");
   const [role, setRole] = useState<"member" | "admin">("member");
+  const [accessMode, setAccessMode] = useState<"all" | "assigned">("all");
   const [password, setPassword] = useState(generatePassword);
   const [error, setError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
@@ -42,14 +43,18 @@ function AddUserForm({ onCreated }: { onCreated: (message: string) => void }) {
       const response = await fetch("/api/admin/users", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, name, role, password }),
+        body: JSON.stringify({ email, name, role, password, access_mode: accessMode }),
       });
       const result = await response.json().catch(() => null);
       if (!response.ok) throw new Error(result?.error ?? "Could not create user");
-      onCreated(`Created ${email}. Share this password with them privately: ${password}`);
+      onCreated(
+        `Created ${email}. Share this password with them privately: ${password}` +
+          (role === "member" && accessMode === "assigned" ? ". They see no investors until you assign some in the Assignments tab." : "")
+      );
       setEmail("");
       setName("");
       setRole("member");
+      setAccessMode("all");
       setPassword(generatePassword());
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not create user");
@@ -62,7 +67,7 @@ function AddUserForm({ onCreated }: { onCreated: (message: string) => void }) {
     <form onSubmit={submit} className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
       <h2 className="text-base font-semibold">Add a person</h2>
       <p className="mt-0.5 text-sm text-slate-500">They sign in with this email and password and land in their company&apos;s workspace.</p>
-      <div className="mt-4 grid gap-3 md:grid-cols-[1.4fr_1fr_0.8fr_1.2fr_auto]">
+      <div className="mt-4 grid gap-3 md:grid-cols-[1.4fr_1fr_0.8fr_1fr_1.2fr_auto]">
         <label className="block">
           <span className="text-xs font-medium text-slate-500">Work email</span>
           <input type="email" required value={email} onChange={(event) => setEmail(event.target.value)} placeholder="name@beatband.in" className={`mt-1 ${INPUT}`} />
@@ -80,6 +85,19 @@ function AddUserForm({ onCreated }: { onCreated: (message: string) => void }) {
             <option value="member">Member</option>
             <option value="admin">Admin</option>
           </select>
+        </label>
+        <label className="block">
+          <span className="text-xs font-medium text-slate-500">Investor access</span>
+          <select
+            value={role === "admin" ? "all" : accessMode}
+            disabled={role === "admin"}
+            onChange={(event) => setAccessMode(event.target.value as "all" | "assigned")}
+            className={`mt-1 ${INPUT} disabled:bg-slate-50 disabled:text-slate-400`}
+          >
+            <option value="all">All investors</option>
+            <option value="assigned">Only assigned</option>
+          </select>
+          {role === "admin" && <span className="mt-1 block text-xs text-slate-400">Admins always see all</span>}
         </label>
         <label className="block">
           <span className="flex items-center justify-between text-xs font-medium text-slate-500">
@@ -101,12 +119,13 @@ function AddUserForm({ onCreated }: { onCreated: (message: string) => void }) {
   );
 }
 
-function UserRow({ user, isSelf, onChanged, onMessage, onOpenActivity }: {
+function UserRow({ user, isSelf, onChanged, onMessage, onOpenActivity, onOpenAssignments }: {
   user: AdminUserRow;
   isSelf: boolean;
   onChanged: () => void;
   onMessage: (text: string, tone?: "ok" | "error") => void;
   onOpenActivity: (userId: string) => void;
+  onOpenAssignments: (userId: string) => void;
 }) {
   const [busy, setBusy] = useState(false);
   const company = companyById(user.company_id);
@@ -138,6 +157,20 @@ function UserRow({ user, isSelf, onChanged, onMessage, onOpenActivity }: {
       </td>
       <td className="px-4 py-3 text-xs">
         {user.is_active ? <span className="text-emerald-700">Active</span> : <span className="text-rose-600">Deactivated</span>}
+      </td>
+      <td className="px-4 py-3 text-xs">
+        <button
+          type="button"
+          onClick={() => onOpenAssignments(user.id)}
+          title="Manage which investors they can see"
+          className={`rounded-full px-2 py-0.5 font-medium ring-1 ring-inset transition-colors ${
+            user.role === "admin" || user.access_mode === "all"
+              ? "bg-slate-50 text-slate-600 ring-slate-200 hover:bg-slate-100"
+              : "bg-indigo-50 text-indigo-700 ring-indigo-200 hover:bg-indigo-100"
+          }`}
+        >
+          {user.role === "admin" || user.access_mode === "all" ? "All investors" : `Assigned · ${user.assigned_count.toLocaleString()}`}
+        </button>
       </td>
       <td className="whitespace-nowrap px-4 py-3 text-xs text-slate-500">
         {user.last_seen_at ? formatDateTime(user.last_seen_at) : user.last_login_at ? formatDateTime(user.last_login_at) : "Never signed in"}
@@ -190,7 +223,13 @@ function UserRow({ user, isSelf, onChanged, onMessage, onOpenActivity }: {
   );
 }
 
-export function UsersPanel({ onOpenActivity }: { onOpenActivity: (userId: string) => void }) {
+export function UsersPanel({
+  onOpenActivity,
+  onOpenAssignments,
+}: {
+  onOpenActivity: (userId: string) => void;
+  onOpenAssignments: (userId: string) => void;
+}) {
   const [users, setUsers] = useState<AdminUserRow[] | null>(null);
   const [companyFilter, setCompanyFilter] = useState("");
   const [message, setMessage] = useState<{ text: string; tone: "ok" | "error" } | null>(null);
@@ -247,6 +286,7 @@ export function UsersPanel({ onOpenActivity }: { onOpenActivity: (userId: string
                 <th className="px-4 py-2.5">Company</th>
                 <th className="px-4 py-2.5">Role</th>
                 <th className="px-4 py-2.5">Status</th>
+                <th className="px-4 py-2.5">Investor access</th>
                 <th className="px-4 py-2.5">Last active</th>
                 <th className="px-4 py-2.5 text-right">Activity</th>
                 <th className="px-4 py-2.5 text-right">Actions</th>
@@ -255,7 +295,7 @@ export function UsersPanel({ onOpenActivity }: { onOpenActivity: (userId: string
             <tbody className="divide-y divide-slate-100">
               {users === null ? (
                 <tr>
-                  <td colSpan={7} className="px-4 py-8 text-center text-slate-400">
+                  <td colSpan={8} className="px-4 py-8 text-center text-slate-400">
                     Loading…
                   </td>
                 </tr>
@@ -268,6 +308,7 @@ export function UsersPanel({ onOpenActivity }: { onOpenActivity: (userId: string
                     onChanged={load}
                     onMessage={showMessage}
                     onOpenActivity={onOpenActivity}
+                    onOpenAssignments={onOpenAssignments}
                   />
                 ))
               )}

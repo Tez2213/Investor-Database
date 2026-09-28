@@ -6,10 +6,12 @@ import { useEffect, useState } from "react";
 import { ActivityLog } from "./ActivityLog";
 import { Overview } from "./Overview";
 import { UsersPanel } from "./UsersPanel";
+import { AssignmentsPanel } from "./assignments/AssignmentsPanel";
 
 const TABS = [
   { id: "overview", label: "Overview" },
   { id: "users", label: "Users & access" },
+  { id: "assignments", label: "Assignments" },
   { id: "activity", label: "Activity log" },
 ] as const;
 
@@ -77,6 +79,7 @@ export function AdminPage({ adminName }: { adminName: string }) {
     };
   }, [router]);
   const [activityFilter, setActivityFilter] = useState<{ userId?: string; company?: string }>({});
+  const [assignmentUserId, setAssignmentUserId] = useState<string | undefined>(undefined);
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900">
@@ -117,8 +120,13 @@ export function AdminPage({ adminName }: { adminName: string }) {
               setActivityFilter({ userId });
               setTab("activity");
             }}
+            onOpenAssignments={(userId) => {
+              setAssignmentUserId(userId);
+              setTab("assignments");
+            }}
           />
         )}
+        {tab === "assignments" && <AssignmentsPanel key={assignmentUserId ?? "none"} initialUserId={assignmentUserId} />}
         {tab === "activity" && <ActivityLog key={JSON.stringify(activityFilter)} initialFilter={activityFilter} />}
       </div>
     </div>

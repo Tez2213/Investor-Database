@@ -39,8 +39,9 @@ export async function POST(request: NextRequest) {
     locked_until: Date | null;
     company_id: CompanyId;
     name: string | null;
+    access_mode: "all" | "assigned";
   }>(
-    `SELECT id, password_hash, role, is_active, failed_attempts, locked_until, company_id, name
+    `SELECT id, password_hash, role, is_active, failed_attempts, locked_until, company_id, name, access_mode
      FROM auth_users WHERE email = $1`,
     [email]
   );
@@ -98,6 +99,7 @@ export async function POST(request: NextRequest) {
     role: user.role,
     companyId: user.company_id,
     homeCompanyId: user.company_id,
+    accessMode: user.access_mode,
   };
   auditLater(request, session, { action: "login" });
 

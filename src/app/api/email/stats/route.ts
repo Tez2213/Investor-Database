@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { pool } from "../../../../lib/db";
 import { requireSession } from "../../../../lib/auth/session";
+import { investorAccessCondition } from "../../../../lib/access";
 import type { EmailStats } from "../../../../lib/types";
 
 const ALLOWED_DAYS = new Set([0, 7, 30, 90]);
@@ -16,6 +17,13 @@ export async function GET(request: NextRequest) {
   const requested = Number(request.nextUrl.searchParams.get("days") ?? 30);
   const days = ALLOWED_DAYS.has(requested) ? requested : 30;
 
+  const values: unknown[] = [session.companyId, days];
+  // Members limited to assigned investors see numbers for their investors only.
+  const access = investorAccessCondition(session, "investor_id", (value) => {
+    values.push(value);
+    return `$${values.length}`;
+  });
+
   try {
     const result = await pool.query<{
       sent: string;
@@ -29,6 +37,7 @@ export async function GET(request: NextRequest) {
       `WITH period AS (
          SELECT * FROM emails
          WHERE company_id = $1 AND ($2::int = 0 OR occurred_at > now() - make_interval(days => $2::int))
+           ${access ? `AND ${access}` : ""}
        ),
        first_contact AS (
          SELECT investor_id, min(occurred_at) AS first_sent_at
@@ -51,7 +60,7 @@ export async function GET(request: NextRequest) {
               AND r.investor_id = f.investor_id AND r.occurred_at > f.first_sent_at
           )) AS replied
        FROM period`,
-      [session.companyId, days]
+      values
     );
     const row = result.rows[0];
     const stats: EmailStats = {

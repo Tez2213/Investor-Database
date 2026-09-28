@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { pool } from "../../../../lib/db";
 import { auditLater } from "../../../../lib/audit";
 import { actorName, requireSession } from "../../../../lib/auth/session";
+import { NOT_ASSIGNED_ERROR, canAccessInvestor, isRestricted } from "../../../../lib/access";
 import { FILTER_OPTIONS_CACHE_KEY, invalidateCache } from "../../../../lib/cache";
 import { applyInvestorChanges, parseInvestorChanges } from "../../../../lib/investorChanges";
 import { investorSelect } from "../../../../lib/investorQuery";
@@ -22,6 +23,23 @@ export async function GET(
   }
 
   try {
+    if (!(await canAccessInvestor(pool, session, id))) {
+      return NextResponse.json({ error: NOT_ASSIGNED_ERROR, code: "not_assigned" }, { status: 403 });
+    }
+
+    // Previous / next stay within what this person can open.
+    const neighbourQuery = isRestricted(session)
+      ? pool.query<{ prev_id: string | null; next_id: string | null }>(
+          `SELECT (SELECT max(investor_id) FROM user_investor_assignments WHERE user_id = $2 AND investor_id < $1) AS prev_id,
+                  (SELECT min(investor_id) FROM user_investor_assignments WHERE user_id = $2 AND investor_id > $1) AS next_id`,
+          [id, session.userId]
+        )
+      : pool.query<{ prev_id: string | null; next_id: string | null }>(
+          `SELECT (SELECT max(id) FROM investors WHERE id < $1) AS prev_id,
+                  (SELECT min(id) FROM investors WHERE id > $1) AS next_id`,
+          [id]
+        );
+
     const [investor, neighbours, stats] = await Promise.all([
       pool.query<InvestorProfile>(
         `${investorSelect("$1", ", mine.notes, coalesce(mine.tags, '{}') AS tags, uploader.email AS uploaded_by_email")}
@@ -29,11 +47,7 @@ export async function GET(
          WHERE i.id = $2`,
         [session.companyId, id]
       ),
-      pool.query<{ prev_id: string | null; next_id: string | null }>(
-        `SELECT (SELECT max(id) FROM investors WHERE id < $1) AS prev_id,
-                (SELECT min(id) FROM investors WHERE id > $1) AS next_id`,
-        [id]
-      ),
+      neighbourQuery,
       pool.query<{ sent: string; opened: string; received: string; comments: string; last_email_at: string | null }>(
         `SELECT count(*) FILTER (WHERE kind = 'email_sent') AS sent,
                 count(*) FILTER (WHERE kind = 'email_opened') AS opened,
@@ -97,6 +111,10 @@ export async function PATCH(
   }
 
   try {
+    if (!(await canAccessInvestor(pool, session, id))) {
+      return NextResponse.json({ error: NOT_ASSIGNED_ERROR, code: "not_assigned" }, { status: 403 });
+    }
+
     const { rows } = await applyInvestorChanges(pool, [id], parsed.changes, {
       actor: actorName(session),
       companyId: session.companyId,

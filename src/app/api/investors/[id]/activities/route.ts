@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { pool } from "../../../../../lib/db";
 import { auditLater } from "../../../../../lib/audit";
 import { actorName, requireSession } from "../../../../../lib/auth/session";
+import { NOT_ASSIGNED_ERROR, canAccessInvestor } from "../../../../../lib/access";
 import { logActivities } from "../../../../../lib/activity";
 import { emailSummaryJson } from "../../../../../lib/emailColumns";
 import { parseId } from "../../../../../lib/parseId";
@@ -24,6 +25,9 @@ export async function GET(
   const id = parseId((await params).id);
   if (id === null) {
     return NextResponse.json({ error: "Invalid investor id" }, { status: 400 });
+  }
+  if (!(await canAccessInvestor(pool, session, id))) {
+    return NextResponse.json({ error: NOT_ASSIGNED_ERROR, code: "not_assigned" }, { status: 403 });
   }
 
   const cursor = request.nextUrl.searchParams.get("cursor");
@@ -76,6 +80,9 @@ export async function POST(
   const id = parseId((await params).id);
   if (id === null) {
     return NextResponse.json({ error: "Invalid investor id" }, { status: 400 });
+  }
+  if (!(await canAccessInvestor(pool, session, id))) {
+    return NextResponse.json({ error: NOT_ASSIGNED_ERROR, code: "not_assigned" }, { status: 403 });
   }
 
   const body = await request.json().catch(() => null);

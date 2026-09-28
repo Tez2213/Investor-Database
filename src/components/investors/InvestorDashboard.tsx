@@ -81,6 +81,8 @@ export function InvestorDashboard() {
   const [error, setError] = useState<string | null>(null);
   const [filterOptions, setFilterOptions] = useState<FilterOptions | null>(null);
   const [totalInvestors, setTotalInvestors] = useState<number | null>(null);
+  // True when this person only sees the investors an admin assigned to them.
+  const [assignedOnly, setAssignedOnly] = useState(false);
   // Checked rows persist across searches so a list can be built from several queries.
   const [checked, setChecked] = useState<Map<Investor["id"], Investor>>(() => new Map());
 
@@ -194,7 +196,11 @@ export function InvestorDashboard() {
     loadFilterOptions();
     fetch("/api/stats")
       .then((res) => (res.ok ? res.json() : null))
-      .then((data: { totalInvestors: number } | null) => data && setTotalInvestors(data.totalInvestors))
+      .then((data: { totalInvestors: number; assignedOnly?: boolean } | null) => {
+        if (!data) return;
+        setTotalInvestors(data.totalInvestors);
+        setAssignedOnly(Boolean(data.assignedOnly));
+      })
       .catch(() => undefined);
   }, [loadFilterOptions]);
 
@@ -393,7 +399,7 @@ export function InvestorDashboard() {
 
         <div className="flex items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-4 py-1.5 text-sm font-medium text-slate-700">
           <span className="h-2 w-2 rounded-full bg-emerald-500" />
-          {formatCount(totalInvestors)} Investors
+          {assignedOnly ? `${formatCount(totalInvestors)} assigned to you` : `${formatCount(totalInvestors)} Investors`}
         </div>
       </AppHeader>
 
@@ -481,6 +487,7 @@ export function InvestorDashboard() {
             onToggleChecked={handleToggleChecked}
             onToggleAllChecked={handleToggleAllChecked}
             onQualityChange={handleRowQuality}
+            noAssignments={assignedOnly && totalInvestors === 0}
           />
         </div>
       </div>

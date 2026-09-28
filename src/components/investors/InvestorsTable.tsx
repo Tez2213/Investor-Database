@@ -22,6 +22,8 @@ type InvestorsTableProps = {
   onToggleChecked: (investor: Investor) => void;
   onToggleAllChecked: () => void;
   onQualityChange: (investor: Investor, quality: string | null) => Promise<void>;
+  /** Set when this person only sees assigned investors and has none yet. */
+  noAssignments?: boolean;
 };
 
 const COLUMN_COUNT = 9;
@@ -59,6 +61,7 @@ export function InvestorsTable({
   onToggleChecked,
   onToggleAllChecked,
   onQualityChange,
+  noAssignments = false,
 }: InvestorsTableProps) {
   const checkedLoadedCount = investors.filter((investor) =>
     checkedIds.has(investor.id)
@@ -107,10 +110,12 @@ export function InvestorsTable({
           </svg>
         </div>
         <div className="text-sm font-medium text-slate-700">
-          No investors found.
+          {noAssignments ? "No investors are assigned to you yet." : "No investors found."}
         </div>
         <div className="text-sm text-slate-500">
-          Try changing your search or filters.
+          {noAssignments
+            ? "Your admin decides which investors you work on. Ask them to assign some to you."
+            : "Try changing your search or filters."}
         </div>
       </div>
     );

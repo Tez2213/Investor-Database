@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { pool } from "../../../../lib/db";
 import { requireSession } from "../../../../lib/auth/session";
+import { investorAccessCondition } from "../../../../lib/access";
 import { getCompanyMailConfig } from "../../../../lib/mail/config";
 import type { EmailSetupStatus } from "../../../../lib/types";
 
@@ -9,11 +10,19 @@ export async function GET(request: NextRequest) {
   const session = await requireSession(request);
   if (session instanceof NextResponse) return session;
 
+  const values: unknown[] = [session.companyId];
+  // Members limited to assigned investors only count mail from those investors.
+  const access = investorAccessCondition(session, "investor_id", (value) => {
+    values.push(value);
+    return `$${values.length}`;
+  });
+
   try {
     const result = await pool.query<{ unread: string; last_synced_at: string | null }>(
-      `SELECT (SELECT count(*) FROM emails WHERE company_id = $1 AND direction = 'inbound' AND NOT is_read) AS unread,
+      `SELECT (SELECT count(*) FROM emails
+               WHERE company_id = $1 AND direction = 'inbound' AND NOT is_read ${access ? `AND ${access}` : ""}) AS unread,
               (SELECT max(last_synced_at) FROM email_sync_state WHERE company_id = $1) AS last_synced_at`,
-      [session.companyId]
+      values
     );
     const config = getCompanyMailConfig(session.companyId);
     const status: EmailSetupStatus = {

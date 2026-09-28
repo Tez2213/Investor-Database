@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { pool } from "../../../../../lib/db";
 import { auditLater } from "../../../../../lib/audit";
 import { actorName, requireSession } from "../../../../../lib/auth/session";
+import { NOT_ASSIGNED_ERROR, canAccessInvestor } from "../../../../../lib/access";
 import { parseCompanyDataChanges, updateCompanyData } from "../../../../../lib/companyData";
 import { investorSelect } from "../../../../../lib/investorQuery";
 import { parseId } from "../../../../../lib/parseId";
@@ -26,6 +27,9 @@ export async function PATCH(
   }
 
   try {
+    if (!(await canAccessInvestor(pool, session, id))) {
+      return NextResponse.json({ error: NOT_ASSIGNED_ERROR, code: "not_assigned" }, { status: 403 });
+    }
     const result = await updateCompanyData(pool, {
       companyId: session.companyId,
       ids: [id],

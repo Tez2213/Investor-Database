@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { pool } from "../../../lib/db";
 import { requireSession } from "../../../lib/auth/session";
+import { investorAccessCondition } from "../../../lib/access";
 import { isCompanyId } from "../../../lib/companies";
 import { parseInvestorCode } from "../../../lib/format";
 import { investorSelect, outreachCondition, teamScoreCondition } from "../../../lib/investorQuery";
@@ -42,6 +43,10 @@ export async function GET(request: NextRequest) {
       values.push(value);
       return `$${values.length}`;
     };
+
+    // Members limited to assigned investors only ever get those rows.
+    const access = investorAccessCondition(session, "i.id", param);
+    if (access) conditions.push(access);
 
     if (search) {
       // Searching an investor ID ("INV-000123", "#123" or "123") also matches that row.

@@ -20,6 +20,8 @@ export type Session = {
   companyId: CompanyId;
   /** Company the account belongs to. */
   homeCompanyId: CompanyId;
+  /** "assigned": a member limited to investors an admin assigned to them (see lib/access). */
+  accessMode: "all" | "assigned";
 };
 
 /** Safe subset sent to the browser. */
@@ -93,9 +95,10 @@ async function loadSession(tokenHash: string): Promise<Session | null> {
     name: string | null;
     role: "admin" | "member";
     home_company_id: CompanyId;
+    access_mode: "all" | "assigned";
     last_seen_at: Date;
   }>(
-    `SELECT s.user_id, s.last_seen_at, u.email, u.name, u.role, u.company_id AS home_company_id
+    `SELECT s.user_id, s.last_seen_at, u.email, u.name, u.role, u.company_id AS home_company_id, u.access_mode
      FROM auth_sessions s JOIN auth_users u ON u.id = s.user_id
      WHERE s.token_hash = $1 AND s.kind = 'user' AND s.expires_at > now() AND u.is_active AND NOT u.is_super_admin`,
     [tokenHash]
@@ -117,6 +120,7 @@ async function loadSession(tokenHash: string): Promise<Session | null> {
     // To work in another company, sign out and sign in with that company's account.
     companyId: row.home_company_id,
     homeCompanyId: row.home_company_id,
+    accessMode: row.access_mode,
   };
 }
 
@@ -153,6 +157,7 @@ export function toSessionUser(session: Session): SessionUser {
     role: session.role,
     companyId: session.companyId,
     homeCompanyId: session.homeCompanyId,
+    accessMode: session.accessMode,
   };
 }
 

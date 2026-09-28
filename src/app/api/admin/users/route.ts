@@ -12,6 +12,8 @@ export async function GET(request: NextRequest) {
 
   const result = await pool.query<AdminUserRow>(
     `SELECT u.id, u.email, u.name, u.company_id, u.role, u.is_active, u.created_at, u.created_by, u.last_login_at,
+            u.access_mode,
+            (SELECT count(*)::int FROM user_investor_assignments x WHERE x.user_id = u.id) AS assigned_count,
             (SELECT max(last_seen_at) FROM auth_sessions s WHERE s.user_id = u.id) AS last_seen_at,
             (SELECT count(*)::int FROM audit_log a WHERE a.user_id = u.id AND a.created_at > now() - interval '7 days') AS actions_7d
      FROM auth_users u
@@ -30,6 +32,8 @@ export async function POST(request: NextRequest) {
   const email = typeof body?.email === "string" ? body.email.trim().toLowerCase() : "";
   const name = typeof body?.name === "string" ? body.name.trim().slice(0, 80) || null : null;
   const role = body?.role === "admin" ? "admin" : "member";
+  // Admins always see every investor; members can start limited to assigned investors.
+  const accessMode = role === "member" && body?.access_mode === "assigned" ? "assigned" : "all";
 
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
     return NextResponse.json({ error: "Enter a valid email address" }, { status: 400 });
@@ -44,11 +48,11 @@ export async function POST(request: NextRequest) {
 
   try {
     const created = await pool.query<{ id: string }>(
-      `INSERT INTO auth_users (email, name, company_id, role, password_hash, created_by)
-       VALUES ($1, $2, $3, $4, $5, $6)
+      `INSERT INTO auth_users (email, name, company_id, role, password_hash, created_by, access_mode)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)
        ON CONFLICT (email) DO NOTHING
        RETURNING id`,
-      [email, name, company.id, role, await hashPassword(body.password), session.email]
+      [email, name, company.id, role, await hashPassword(body.password), session.email, accessMode]
     );
     if (created.rowCount === 0) {
       return NextResponse.json({ error: "A user with this email already exists" }, { status: 409 });
@@ -56,7 +60,7 @@ export async function POST(request: NextRequest) {
     auditLater(request, session, {
       action: "user_created",
       companyId: company.id,
-      details: { userId: created.rows[0].id, email, role },
+      details: { userId: created.rows[0].id, email, role, access_mode: accessMode },
     });
     return NextResponse.json({ data: { id: created.rows[0].id } }, { status: 201 });
   } catch (error) {

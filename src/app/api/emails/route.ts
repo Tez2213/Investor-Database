@@ -2,6 +2,7 @@ import { NextRequest, NextResponse, after } from "next/server";
 import { pool } from "../../../lib/db";
 import { auditLater } from "../../../lib/audit";
 import { actorName, requireSession } from "../../../lib/auth/session";
+import { NOT_ASSIGNED_ERROR, accessibleInvestorIds, investorAccessCondition, isRestricted } from "../../../lib/access";
 import { logActivities, withTransaction } from "../../../lib/activity";
 import { emailSummaryColumns } from "../../../lib/emailColumns";
 import { parseId } from "../../../lib/parseId";
@@ -44,6 +45,10 @@ export async function GET(request: NextRequest) {
     return `$${values.length}`;
   };
   const conditions = ["e.company_id = $1", folderCondition];
+
+  // Members limited to assigned investors only see mail linked to those investors.
+  const access = investorAccessCondition(session, "e.investor_id", param);
+  if (access) conditions.push(access);
 
   const search = params.get("search")?.trim();
   if (search) {
@@ -123,13 +128,6 @@ export async function POST(request: NextRequest) {
   }
   const replyToId = body.replyToEmailId == null ? null : parseId(body.replyToEmailId);
 
-  if (!isSmtpConfigured(companyId)) {
-    return NextResponse.json(
-      { error: "Your company's mailbox isn't connected yet. Ask your admin to add it.", code: "not_configured" },
-      { status: 503 }
-    );
-  }
-
   const actor = actorName(session);
 
   try {
@@ -153,6 +151,34 @@ export async function POST(request: NextRequest) {
           )
         ).rows[0] ?? null
       : null;
+    if (replyToId && !parent) {
+      return NextResponse.json({ error: "The email you're replying to was not found" }, { status: 404 });
+    }
+
+    // Members limited to assigned investors can only email (and reply to) those investors.
+    if (isRestricted(session)) {
+      const matchedRecipients = await findInvestorIdsByAddresses(pool, [...to, ...cc]);
+      const involved = [investorId, parent?.investor_id, ...matchedRecipients].filter(
+        (value): value is string | number => value != null
+      );
+      if (involved.length === 0) {
+        return NextResponse.json(
+          { error: "You can only email investors assigned to you. Open the investor's page and send from there.", code: "not_assigned" },
+          { status: 403 }
+        );
+      }
+      const allowed = await accessibleInvestorIds(pool, session, involved);
+      if (involved.some((value) => !allowed.has(String(value)))) {
+        return NextResponse.json({ error: NOT_ASSIGNED_ERROR, code: "not_assigned" }, { status: 403 });
+      }
+    }
+
+    if (!isSmtpConfigured(companyId)) {
+      return NextResponse.json(
+        { error: "Your company's mailbox isn't connected yet. Ask your admin to add it.", code: "not_configured" },
+        { status: 503 }
+      );
+    }
 
     const renderedSubject = renderTemplate(subject, investor ?? null);
     const renderedText = renderTemplate(text, investor ?? null);
