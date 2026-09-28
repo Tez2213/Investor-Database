@@ -31,7 +31,7 @@ type EmailComposerProps = {
   title?: string;
 };
 
-/** Write and send an email from the connected mailbox (Titan). */
+/** Write and send an email from the company's connected mailbox. */
 export function EmailComposer({ investorId, defaults, setup, onSent, onCancel, title }: EmailComposerProps) {
   const [to, setTo] = useState(defaults.to.join(", "));
   const [cc, setCc] = useState((defaults.cc ?? []).join(", "));

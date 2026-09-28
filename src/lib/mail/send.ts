@@ -55,6 +55,18 @@ export type SendResult = {
   error: string | null;
 };
 
+/** Turns SMTP failures into something a user can act on. */
+function describeSendError(sendError: unknown): string {
+  const code = (sendError as { code?: string } | null)?.code;
+  if (code === "EAUTH") {
+    return "The mail server rejected the mailbox login. Check the mailbox password in the environment settings.";
+  }
+  if (code === "ECONNECTION" || code === "ETIMEDOUT" || code === "ESOCKET" || code === "EDNS") {
+    return "Could not reach the mail server. Please try again in a moment.";
+  }
+  return sendError instanceof Error ? sendError.message : "Failed to send email";
+}
+
 export function isSmtpConfigured(companyId: string): boolean {
   return getCompanyMailConfig(companyId).smtp !== null;
 }
@@ -89,7 +101,7 @@ export async function sendEmail(companyId: string, email: OutgoingEmail): Promis
       raw,
     });
   } catch (sendError) {
-    error = sendError instanceof Error ? sendError.message : "Failed to send email";
+    error = describeSendError(sendError);
   }
 
   return { messageId, fromAddress: sender.address, fromName: sender.name, raw, error };

@@ -16,7 +16,7 @@ export type Session = {
   email: string;
   name: string | null;
   role: "admin" | "member";
-  /** Workspace being viewed (admins can switch). */
+  /** Workspace being viewed: always the account's own company. */
   companyId: CompanyId;
   /** Company the account belongs to. */
   homeCompanyId: CompanyId;
@@ -56,7 +56,7 @@ export function clearSessionCookie(response: NextResponse) {
 /**
  * Short-lived in-memory cache of session lookups, so clicking around doesn't
  * cost a database round trip per request. Sign-out, deactivation, password
- * resets and workspace switches clear the affected entries immediately.
+ * resets clear the affected entries immediately.
  */
 const SESSION_CACHE_MS = 15_000;
 const globalForSessions = globalThis as unknown as {
@@ -92,11 +92,10 @@ async function loadSession(tokenHash: string): Promise<Session | null> {
     email: string;
     name: string | null;
     role: "admin" | "member";
-    company_id: CompanyId;
     home_company_id: CompanyId;
     last_seen_at: Date;
   }>(
-    `SELECT s.user_id, s.company_id, s.last_seen_at, u.email, u.name, u.role, u.company_id AS home_company_id
+    `SELECT s.user_id, s.last_seen_at, u.email, u.name, u.role, u.company_id AS home_company_id
      FROM auth_sessions s JOIN auth_users u ON u.id = s.user_id
      WHERE s.token_hash = $1 AND s.expires_at > now() AND u.is_active`,
     [tokenHash]
@@ -114,8 +113,9 @@ async function loadSession(tokenHash: string): Promise<Session | null> {
     email: row.email,
     name: row.name,
     role: row.role,
-    // Members are always pinned to their own company.
-    companyId: row.role === "admin" ? row.company_id : row.home_company_id,
+    // Every account, admins included, only ever sees its own company's workspace.
+    // To work in another company, sign out and sign in with that company's account.
+    companyId: row.home_company_id,
     homeCompanyId: row.home_company_id,
   };
 }

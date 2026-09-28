@@ -3,8 +3,14 @@ import { companyById } from "../companies";
 /**
  * Each company connects its own mailbox through environment variables
  * (see .env.example), e.g. FABRICVTON_MAIL_USER / FABRICVTON_MAIL_PASS.
- * Servers default to Titan Mail (GoDaddy): smtp.titan.email:465 and imap.titan.email:993.
+ * Servers default to GoDaddy Professional Email (smtpout.secureserver.net:465 and
+ * imap.secureserver.net:993), which hosts all three company domains. Override them
+ * for every company with SMTP_HOST / IMAP_HOST, or for one company with e.g.
+ * FABRICVTON_SMTP_HOST, if a mailbox moves to another provider.
  */
+
+const DEFAULT_SMTP_HOST = "smtpout.secureserver.net";
+const DEFAULT_IMAP_HOST = "imap.secureserver.net";
 
 export type ServerConfig = {
   host: string;
@@ -25,6 +31,11 @@ function envNumber(value: string | undefined, fallback: number): number {
   return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
 }
 
+/** A per-company value such as FABRICVTON_SMTP_HOST wins over the shared SMTP_HOST. */
+function setting(prefix: string, name: string): string | undefined {
+  return process.env[`${prefix}_${name}`]?.trim() || process.env[name]?.trim() || undefined;
+}
+
 function secureFlag(value: string | undefined, port: number, securePort: number): boolean {
   return value ? value !== "false" : port === securePort;
 }
@@ -40,20 +51,20 @@ export function getCompanyMailConfig(companyId: string): CompanyMailConfig {
     return { smtp: null, imap: null, sender: { address: user || null, name } };
   }
 
-  const smtpPort = envNumber(process.env.SMTP_PORT, 465);
-  const imapPort = envNumber(process.env.IMAP_PORT, 993);
+  const smtpPort = envNumber(setting(prefix, "SMTP_PORT"), 465);
+  const imapPort = envNumber(setting(prefix, "IMAP_PORT"), 993);
   return {
     smtp: {
-      host: process.env.SMTP_HOST?.trim() || "smtp.titan.email",
+      host: setting(prefix, "SMTP_HOST") ?? DEFAULT_SMTP_HOST,
       port: smtpPort,
-      secure: secureFlag(process.env.SMTP_SECURE, smtpPort, 465),
+      secure: secureFlag(setting(prefix, "SMTP_SECURE"), smtpPort, 465),
       user,
       pass,
     },
     imap: {
-      host: process.env.IMAP_HOST?.trim() || "imap.titan.email",
+      host: setting(prefix, "IMAP_HOST") ?? DEFAULT_IMAP_HOST,
       port: imapPort,
-      secure: secureFlag(process.env.IMAP_SECURE, imapPort, 993),
+      secure: secureFlag(setting(prefix, "IMAP_SECURE"), imapPort, 993),
       user,
       pass,
     },

@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
-import { COMPANIES, companyById } from "../lib/companies";
+import { companyById } from "../lib/companies";
 import { initialsOf } from "../lib/format";
 import type { EmailSetupStatus } from "../lib/types";
 import { useSession } from "./SessionProvider";
@@ -34,46 +34,14 @@ function NavLink({ href, label, badge }: { href: string; label: string; badge?: 
   );
 }
 
-/** Which company's workspace is open. Admins can switch between all three. */
+/** Which company's workspace is open. Each account belongs to exactly one company. */
 function WorkspaceBadge() {
   const user = useSession();
   const company = companyById(user.companyId);
-  const [isSwitching, setIsSwitching] = useState(false);
-
-  if (user.role !== "admin") {
-    return (
-      <span className={`rounded-full px-3 py-1 text-xs font-semibold ring-1 ring-inset ${company?.soft ?? ""}`}>
-        {company?.name} workspace
-      </span>
-    );
-  }
-
   return (
-    <label className={`flex items-center gap-1.5 rounded-full py-0.5 pl-3 pr-1 text-xs font-semibold ring-1 ring-inset ${company?.soft ?? ""}`}>
-      Workspace
-      <select
-        value={user.companyId}
-        disabled={isSwitching}
-        onChange={async (event) => {
-          setIsSwitching(true);
-          const response = await fetch("/api/auth/workspace", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ companyId: event.target.value }),
-          });
-          // Reload so every list, rating and timeline shows the new workspace.
-          if (response.ok) window.location.reload();
-          else setIsSwitching(false);
-        }}
-        className="cursor-pointer rounded-full border-0 bg-white/70 py-0.5 pl-2 pr-6 text-xs font-semibold outline-none"
-      >
-        {COMPANIES.map((item) => (
-          <option key={item.id} value={item.id}>
-            {item.name}
-          </option>
-        ))}
-      </select>
-    </label>
+    <span className={`rounded-full px-3 py-1 text-xs font-semibold ring-1 ring-inset ${company?.soft ?? ""}`}>
+      {company?.name} workspace
+    </span>
   );
 }
 

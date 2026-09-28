@@ -34,7 +34,7 @@ export async function findSentMailbox(client: ImapFlow): Promise<string | null> 
 
 /**
  * Saves a copy of a message sent over SMTP into the Sent folder, so it also
- * shows in Titan webmail. Best effort: returns an error message instead of throwing.
+ * shows in webmail. Best effort: returns an error message instead of throwing.
  */
 export async function appendToSent(companyId: string, raw: Buffer): Promise<string | null> {
   if (!getCompanyMailConfig(companyId).imap) return null;
