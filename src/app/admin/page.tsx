@@ -1,7 +1,7 @@
 import { AdminPage } from "../../components/admin/AdminPage";
-import { requirePageSession } from "../../lib/auth/requirePage";
+import { requireAdminPage } from "../../lib/auth/adminSession";
 
 export default async function Admin() {
-  await requirePageSession("/admin", { admin: true });
-  return <AdminPage />;
+  const admin = await requireAdminPage();
+  return <AdminPage adminName={admin.name || admin.email} />;
 }

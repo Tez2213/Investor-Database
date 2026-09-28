@@ -1,13 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import type { AdminOverview } from "../../../../lib/adminTypes";
 import { pool } from "../../../../lib/db";
-import { requireSession } from "../../../../lib/auth/session";
+import { requireAdmin } from "../../../../lib/auth/adminSession";
 import { COMPANIES } from "../../../../lib/companies";
 import { getCompanyMailConfig } from "../../../../lib/mail/config";
 
 /** Side-by-side numbers for each company plus overall totals. */
 export async function GET(request: NextRequest) {
-  const session = await requireSession(request, { admin: true });
+  const session = await requireAdmin(request);
   if (session instanceof NextResponse) return session;
 
   try {

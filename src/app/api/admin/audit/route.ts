@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import type { AuditRow } from "../../../../lib/adminTypes";
 import { pool } from "../../../../lib/db";
-import { requireSession } from "../../../../lib/auth/session";
+import { requireAdmin } from "../../../../lib/auth/adminSession";
 import { isCompanyId } from "../../../../lib/companies";
 import { parseId } from "../../../../lib/parseId";
 
@@ -9,7 +9,7 @@ const PAGE_SIZE = 100;
 
 /** Everything that happened across all companies, newest first, with filters. */
 export async function GET(request: NextRequest) {
-  const session = await requireSession(request, { admin: true });
+  const session = await requireAdmin(request);
   if (session instanceof NextResponse) return session;
 
   const params = request.nextUrl.searchParams;

@@ -97,7 +97,7 @@ async function loadSession(tokenHash: string): Promise<Session | null> {
   }>(
     `SELECT s.user_id, s.last_seen_at, u.email, u.name, u.role, u.company_id AS home_company_id
      FROM auth_sessions s JOIN auth_users u ON u.id = s.user_id
-     WHERE s.token_hash = $1 AND s.expires_at > now() AND u.is_active`,
+     WHERE s.token_hash = $1 AND s.kind = 'user' AND s.expires_at > now() AND u.is_active AND NOT u.is_super_admin`,
     [tokenHash]
   );
   const row = result.rows[0];

@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { pool } from "../../../../../lib/db";
 import { auditLater } from "../../../../../lib/audit";
 import { hashPassword, passwordProblem } from "../../../../../lib/auth/password";
-import { forgetCachedSessions, requireSession } from "../../../../../lib/auth/session";
+import { forgetCachedSessions } from "../../../../../lib/auth/session";
+import { requireAdmin } from "../../../../../lib/auth/adminSession";
 import { parseId } from "../../../../../lib/parseId";
 
 /**
@@ -13,7 +14,7 @@ export async function PATCH(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const session = await requireSession(request, { admin: true });
+  const session = await requireAdmin(request);
   if (session instanceof NextResponse) return session;
 
   const id = parseId((await params).id);
@@ -22,14 +23,14 @@ export async function PATCH(
   const body = await request.json().catch(() => null);
   if (!body || typeof body !== "object") return NextResponse.json({ error: "Invalid body" }, { status: 400 });
 
+  // The admin-portal account itself is not managed here.
   const target = await pool.query<{ email: string; company_id: string; role: string; is_active: boolean }>(
-    "SELECT email, company_id, role, is_active FROM auth_users WHERE id = $1",
+    "SELECT email, company_id, role, is_active FROM auth_users WHERE id = $1 AND NOT is_super_admin",
     [id]
   );
   const user = target.rows[0];
   if (!user) return NextResponse.json({ error: "User not found" }, { status: 404 });
 
-  const isSelf = String(id) === session.userId;
   const sets: string[] = [];
   const values: unknown[] = [id];
   const changed: Record<string, unknown> = {};
@@ -43,14 +44,12 @@ export async function PATCH(
   }
   if ("role" in body) {
     if (body.role !== "admin" && body.role !== "member") return NextResponse.json({ error: "Invalid role" }, { status: 400 });
-    if (isSelf && body.role !== "admin") return NextResponse.json({ error: "You can't remove your own admin access" }, { status: 400 });
     values.push(body.role);
     sets.push(`role = $${values.length}`);
     changed.role = body.role;
   }
   if ("is_active" in body) {
     if (typeof body.is_active !== "boolean") return NextResponse.json({ error: "Invalid status" }, { status: 400 });
-    if (isSelf && !body.is_active) return NextResponse.json({ error: "You can't deactivate your own account" }, { status: 400 });
     values.push(body.is_active);
     sets.push(`is_active = $${values.length}`);
     changed.is_active = body.is_active;
@@ -62,7 +61,7 @@ export async function PATCH(
     values.push(await hashPassword(body.password));
     sets.push(`password_hash = $${values.length}, failed_attempts = 0, locked_until = NULL`);
     changed.password = "reset";
-    signOut = !isSelf;
+    signOut = true;
   }
   if (sets.length === 0) return NextResponse.json({ error: "Nothing to update" }, { status: 400 });
 

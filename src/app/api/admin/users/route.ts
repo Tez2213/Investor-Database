@@ -3,11 +3,11 @@ import type { AdminUserRow } from "../../../../lib/adminTypes";
 import { pool } from "../../../../lib/db";
 import { auditLater } from "../../../../lib/audit";
 import { hashPassword, passwordProblem } from "../../../../lib/auth/password";
-import { requireSession } from "../../../../lib/auth/session";
+import { requireAdmin } from "../../../../lib/auth/adminSession";
 import { COMPANIES, companyForEmail } from "../../../../lib/companies";
 
 export async function GET(request: NextRequest) {
-  const session = await requireSession(request, { admin: true });
+  const session = await requireAdmin(request);
   if (session instanceof NextResponse) return session;
 
   const result = await pool.query<AdminUserRow>(
@@ -15,6 +15,7 @@ export async function GET(request: NextRequest) {
             (SELECT max(last_seen_at) FROM auth_sessions s WHERE s.user_id = u.id) AS last_seen_at,
             (SELECT count(*)::int FROM audit_log a WHERE a.user_id = u.id AND a.created_at > now() - interval '7 days') AS actions_7d
      FROM auth_users u
+     WHERE NOT u.is_super_admin
      ORDER BY u.company_id, u.role, u.email`
   );
   return NextResponse.json({ data: result.rows });
@@ -22,7 +23,7 @@ export async function GET(request: NextRequest) {
 
 /** Creates an employee login. The company comes from the email domain. */
 export async function POST(request: NextRequest) {
-  const session = await requireSession(request, { admin: true });
+  const session = await requireAdmin(request);
   if (session instanceof NextResponse) return session;
 
   const body = await request.json().catch(() => null);

@@ -239,7 +239,6 @@ export function AppHeader({ children }: { children?: React.ReactNode }) {
             <NavLink href="/" label="Investors" />
             <NavLink href="/inbox" label="Inbox" badge={unread} />
             <NavLink href="/upload" label="Add leads" />
-            {user.role === "admin" && <NavLink href="/admin" label="Admin" />}
           </nav>
         </div>
         <div className="flex flex-wrap items-center justify-end gap-3">

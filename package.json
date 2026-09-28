@@ -8,7 +8,9 @@
     "start": "next start",
     "lint": "eslint",
     "create-admin": "node --env-file=.env.local scripts/create-user.mjs --role admin",
-    "create-user": "node --env-file=.env.local scripts/create-user.mjs"
+    "create-user": "node --env-file=.env.local scripts/create-user.mjs",
+    "create-super-admin": "node --env-file=.env.local scripts/create-user.mjs --super-admin",
+    "migrate": "node --env-file=.env.local scripts/run-migration.mjs"
   },
   "dependencies": {
     "imapflow": "^2.1.0",

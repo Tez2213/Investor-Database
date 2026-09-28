@@ -3,6 +3,9 @@ import type { PoolClient } from "pg";
 import { pool } from "./db";
 import type { Session } from "./auth/session";
 
+/** Who did it: a workspace user, or the admin portal (not tied to a company). */
+type AuditActor = Pick<Session, "userId" | "email"> & { companyId: string | null };
+
 type Queryable = Pick<PoolClient, "query">;
 
 export type AuditEntry = {
@@ -27,7 +30,7 @@ export function clientInfo(request: NextRequest | null) {
  * Records an audit entry after the response has been sent, so tracking never
  * slows the user down. Use inside route handlers.
  */
-export function auditLater(request: NextRequest, session: Session | null, entry: AuditEntry): void {
+export function auditLater(request: NextRequest, session: AuditActor | null, entry: AuditEntry): void {
   const info = clientInfo(request);
   after(() => writeAudit(info, session, entry, pool));
 }
@@ -38,7 +41,7 @@ export function auditLater(request: NextRequest, session: Session | null, entry:
  */
 export async function audit(
   request: NextRequest | null,
-  session: Session | null,
+  session: AuditActor | null,
   entry: AuditEntry,
   db: Queryable = pool
 ): Promise<void> {
@@ -47,7 +50,7 @@ export async function audit(
 
 async function writeAudit(
   { ip, userAgent }: { ip: string | null; userAgent: string | null },
-  session: Session | null,
+  session: AuditActor | null,
   entry: AuditEntry,
   db: Queryable
 ): Promise<void> {

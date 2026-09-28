@@ -4,7 +4,6 @@ import { useCallback, useEffect, useState } from "react";
 import type { AdminUserRow } from "../../lib/adminTypes";
 import { COMPANIES, companyById, companyForEmail } from "../../lib/companies";
 import { formatDateTime } from "../../lib/format";
-import { useSession } from "../SessionProvider";
 
 const INPUT = "w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-indigo-400 focus:ring-4 focus:ring-indigo-100";
 
@@ -192,7 +191,6 @@ function UserRow({ user, isSelf, onChanged, onMessage, onOpenActivity }: {
 }
 
 export function UsersPanel({ onOpenActivity }: { onOpenActivity: (userId: string) => void }) {
-  const me = useSession();
   const [users, setUsers] = useState<AdminUserRow[] | null>(null);
   const [companyFilter, setCompanyFilter] = useState("");
   const [message, setMessage] = useState<{ text: string; tone: "ok" | "error" } | null>(null);
@@ -266,7 +264,7 @@ export function UsersPanel({ onOpenActivity }: { onOpenActivity: (userId: string
                   <UserRow
                     key={user.id}
                     user={user}
-                    isSelf={user.id === me.id}
+                    isSelf={false}
                     onChanged={load}
                     onMessage={showMessage}
                     onOpenActivity={onOpenActivity}
