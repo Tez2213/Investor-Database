@@ -138,8 +138,9 @@ export function EmailComposer({ investorId, defaults, setup, onSent, onCancel, t
           return;
         }
         setError(result?.error ?? `Sending failed (status ${response.status})`);
-        // A refused send is still recorded on the timeline as a failed email.
-        if (response.status === 502) onSent({ ok: false });
+        // A refused send is still recorded on the timeline as a failed email, and a
+        // dead domain changes the investor's quality: refresh the page either way.
+        if (response.status === 502 || result?.markedLow?.length > 0) onSent({ ok: false });
         return;
       }
       notifyMailChanged();

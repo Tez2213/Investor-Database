@@ -198,8 +198,32 @@ export async function POST(request: NextRequest) {
     const recipients = Array.from(new Set([...to, ...cc]));
     const deadAddresses = await undeliverableDomains(recipients);
     if (deadAddresses.length > 0) {
+      // A domain that can't receive mail means the address is dead: rate those investors Low.
+      const domains = Array.from(new Set(deadAddresses.map((address) => address.split("@")[1])));
+      const markedLow = await withTransaction(pool, async (client) =>
+        autoRateInvestors(client, {
+          companyId,
+          investorIds: await findInvestorIdsByAddresses(client, deadAddresses),
+          outcome: "bounced",
+          reason: `The email domain ${domains.join(", ")} doesn't exist or has no mail server.`,
+        })
+      );
+      if (markedLow.length > 0) {
+        auditLater(request, session, {
+          action: "email_failed",
+          investorId: markedLow[0],
+          details: { to: deadAddresses, error: "Domain can't receive email", markedLow },
+        });
+      }
       return NextResponse.json(
-        { error: `${deadAddresses.join(", ")} can't receive email: the domain doesn't exist or has no mail server. Check the spelling.`, code: "bad_domain", addresses: deadAddresses },
+        {
+          error: `${deadAddresses.join(", ")} can't receive email: the domain doesn't exist or has no mail server. Check the spelling.${
+            markedLow.length > 0 ? " The investor's quality was set to Low." : ""
+          }`,
+          code: "bad_domain",
+          addresses: deadAddresses,
+          markedLow,
+        },
         { status: 400 }
       );
     }
