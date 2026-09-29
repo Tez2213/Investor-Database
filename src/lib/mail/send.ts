@@ -75,8 +75,20 @@ function permanentlyRejected(value: unknown): string[] {
     .map((address) => address.toLowerCase());
 }
 
+/**
+ * The mailbox itself is being throttled (e.g. GoDaddy's "has exceeded a sending
+ * limit" for new mailboxes). Nothing is wrong with the recipients.
+ */
+export function isSenderLimitError(sendError: unknown): boolean {
+  const text = `${(sendError as { response?: string } | null)?.response ?? ""} ${sendError instanceof Error ? sendError.message : ""}`;
+  return /sending limit|send limit|rate limit|too many (messages|emails|recipients)|quota|exceeded|try (again )?later|attempt to send your message at a later time/i.test(text);
+}
+
 /** Turns SMTP failures into something a user can act on. */
 function describeSendError(sendError: unknown): string {
+  if (isSenderLimitError(sendError)) {
+    return "Your mailbox has hit the mail provider's sending limit (new or recently changed mailboxes are limited for their first days). Nothing is wrong with this investor's address. Wait a few hours and send again, and keep to about 50–100 emails a day for now.";
+  }
   const code = (sendError as { code?: string } | null)?.code;
   if (code === "EAUTH") {
     return "The mail server rejected the mailbox login. Check the mailbox password in the environment settings.";
@@ -125,7 +137,10 @@ export async function sendEmail(companyId: string, email: OutgoingEmail): Promis
     rejectedRecipients = permanentlyRejected(info);
   } catch (sendError) {
     error = describeSendError(sendError);
-    if ((sendError as { code?: string } | null)?.code === "EENVELOPE") rejectedRecipients = permanentlyRejected(sendError);
+    // A throttled mailbox isn't a bad address, so it must never mark investors Low.
+    if ((sendError as { code?: string } | null)?.code === "EENVELOPE" && !isSenderLimitError(sendError)) {
+      rejectedRecipients = permanentlyRejected(sendError);
+    }
   }
 
   return { messageId, fromAddress: sender.address, fromName: sender.name, raw, error, rejectedRecipients };

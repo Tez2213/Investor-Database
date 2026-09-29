@@ -12,10 +12,12 @@ import { companyById } from "../companies";
 const DEFAULT_SMTP_HOST = "smtpout.secureserver.net";
 const DEFAULT_IMAP_HOST = "imap.secureserver.net";
 /**
- * Stay well under the mailbox provider's daily cap: going over it gets the
- * mailbox blocked for a day and hurts how often mail lands in the inbox.
+ * Stay under the mailbox provider's daily cap: going over it gets the mailbox
+ * blocked and hurts how often mail lands in the inbox. GoDaddy refused the
+ * 101st email in 24 hours from a new mailbox, so 100 is the safe default;
+ * raise it with DAILY_SEND_LIMIT once the mailbox is a few weeks old.
  */
-const DEFAULT_DAILY_SEND_LIMIT = 300;
+const DEFAULT_DAILY_SEND_LIMIT = 100;
 
 export type ServerConfig = {
   host: string;

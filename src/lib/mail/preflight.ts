@@ -85,8 +85,9 @@ export async function preflightChecks(
            WHERE e.company_id = $1 AND e.bounced_addresses && $2::text[] AND address = ANY($2::text[])`,
           [companyId, recipients]
         ),
-    db.query<{ recipients: number }>(
-      `SELECT coalesce(sum(cardinality(to_addresses) + cardinality(cc_addresses)), 0)::int AS recipients
+    db.query<{ recipients: number; oldest: Date | null }>(
+      `SELECT coalesce(sum(cardinality(to_addresses) + cardinality(cc_addresses)), 0)::int AS recipients,
+              min(occurred_at) AS oldest
        FROM emails
        -- Mail sent straight from the mailbox app counts against the same limit.
        WHERE company_id = $1 AND direction = 'outbound' AND status = 'sent'
@@ -114,10 +115,23 @@ export async function preflightChecks(
 
   const limit = dailySendLimit(companyId);
   if (usage.rows[0].recipients + recipients.length > limit) {
+    // Room frees up as the oldest email in the 24-hour window drops out of it.
+    const oldest = usage.rows[0].oldest;
+    const freesAt = oldest
+      ? new Date(new Date(oldest).getTime() + 24 * 60 * 60 * 1000).toLocaleString("en-IN", {
+          timeZone: "Asia/Kolkata",
+          hour: "numeric",
+          minute: "2-digit",
+          day: "numeric",
+          month: "short",
+        })
+      : null;
     return {
       status: 429,
       code: "daily_limit",
-      error: `Your company's mailbox has reached its limit of ${limit} recipients in 24 hours. Going over it gets the mailbox blocked and sends mail to spam. Please continue tomorrow.`,
+      error: `Your company's mailbox has sent to ${usage.rows[0].recipients} people in the last 24 hours, and its daily limit is ${limit}. Going over it gets the mailbox blocked and sends mail to spam.${
+        freesAt ? ` You can send again from about ${freesAt} (India time).` : ""
+      }`,
     };
   }
 
